@@ -5,6 +5,8 @@
 //! A failed match is a *result*, not an error (grilling Q9): check
 //! [`SmResult::valid`]. `Result` is reserved for malformed input.
 
+use crate::math::Mat3;
+
 /// Outcome of one scan match.
 ///
 /// C: `struct sm_result`
@@ -21,6 +23,28 @@ pub struct SmResult {
     pub nvalid: i32,
     /// Total correspondence error. C: `error`
     pub error: f64,
-    // TODO(port): cov_x_m, dx_dy1_m, dx_dy2_m (3×3 matrices, present when
-    // Params::do_compute_covariance) — C: gsl_matrix fields.
+    /// Closed-form covariance of `x`, present only when
+    /// [`crate::Params::do_compute_covariance`]. C: `cov_x_m`
+    pub cov_x: Option<Mat3>,
+    /// d(x)/d(y1), for covariance propagation. C: `dx_dy1_m`
+    pub dx_dy1: Option<Mat3>,
+    /// d(x)/d(y2), for covariance propagation. C: `dx_dy2_m`
+    pub dx_dy2: Option<Mat3>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn default_result_is_invalid_match_without_covariance() {
+        // C: sm_result starts with valid = 0; covariance matrices are only
+        // allocated on request.
+        let r = SmResult::default();
+        assert!(!r.valid);
+        assert_eq!(r.x, [0.0, 0.0, 0.0]);
+        assert_eq!(r.iterations, 0);
+        assert_eq!(r.nvalid, 0);
+        assert!(r.cov_x.is_none() && r.dx_dy1.is_none() && r.dx_dy2.is_none());
+    }
 }
