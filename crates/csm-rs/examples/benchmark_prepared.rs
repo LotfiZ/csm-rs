@@ -17,18 +17,27 @@ fn main() {
         ("full", Matcher::new(Params::default())),
         ("pose_only", Matcher::pose_only(Params::default())),
     ] {
+        for _ in 0..3 {
+            black_box(matcher.match_prepared(&mut reference, &mut sensor).unwrap());
+        }
         let start = Instant::now();
         let mut successful = 0;
+        let mut samples = Vec::with_capacity(30);
         for _ in 0..30 {
+            let sample_start = Instant::now();
             let outcome = matcher
                 .match_prepared(black_box(&mut reference), black_box(&mut sensor))
                 .unwrap();
+            samples.push(sample_start.elapsed().as_secs_f64() * 1e3);
             successful += usize::from(outcome.valid);
             black_box(outcome);
         }
         println!(
-            "mode={label},rays=720,repetitions=30,total_ms={:.3},successful_matches={successful}",
-            start.elapsed().as_secs_f64() * 1e3
+            "mode={label},rays=720,repetitions=30,total_ms={:.3},mean_ms={:.3},min_ms={:.3},max_ms={:.3},successful_matches={successful}",
+            start.elapsed().as_secs_f64() * 1e3,
+            samples.iter().sum::<f64>() / samples.len() as f64,
+            samples.iter().copied().fold(f64::INFINITY, f64::min),
+            samples.iter().copied().fold(0.0, f64::max),
         );
     }
 }
