@@ -175,6 +175,21 @@ impl PreparedMatcher {
             &mut self.scratch,
         )
     }
+
+    /// Match once and report the accepted result as a final snapshot.
+    pub fn match_once_traced<F: FnMut(IterationSnapshot)>(
+        &mut self,
+        mut observe: F,
+    ) -> Result<MatchOutcome, LaserDataError> {
+        let outcome = self.match_once()?;
+        observe(IterationSnapshot {
+            iteration: outcome.iterations.max(0) as usize,
+            pose: outcome.pose,
+            error: outcome.error,
+            valid_correspondences: outcome.nvalid.max(0) as usize,
+        });
+        Ok(outcome)
+    }
 }
 
 impl PreparedPolarScan {
@@ -329,6 +344,14 @@ pub struct MatchOutcome {
     pub covariance: Option<Mat3>,
     pub dx_dy_reference: Option<Matrix>,
     pub dx_dy_sensor: Option<Matrix>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct IterationSnapshot {
+    pub iteration: usize,
+    pub pose: [f64; 3],
+    pub error: f64,
+    pub valid_correspondences: usize,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
