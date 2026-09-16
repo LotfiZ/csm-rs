@@ -73,6 +73,17 @@ well-formed but ICP did not produce a usable match. A `?` error means the
 input arrays or scan values violate CSM's input contract. Invalid lidar rays
 should have `valid[i] == false`; their reading can be `NaN`.
 
+For a beginner-friendly example that creates laser data, prints every beam in
+a readable table, and displays the estimated movement, run:
+
+```sh
+cargo run -p csm-rs --example scan_matching
+```
+
+The example simulates a robot scanning a square room. It needs no input files,
+extra dependencies, or C installation. Change `FIRST_SENSOR_POSE` in
+`crates/csm-rs/examples/scan_matching.rs` to try another small movement.
+
 Regenerate the corpus with the C reference source checked out at
 `/home/agx/workspace/csm-src`:
 
