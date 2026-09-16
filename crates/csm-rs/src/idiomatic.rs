@@ -326,4 +326,16 @@ impl Matcher {
         *result = SmResult::default();
         icp::sm_icp(&self.params, &mut reference.data, &mut sensor.data, result)
     }
+
+    /// Match and notify an application-owned observer after each result.
+    pub fn match_prepared_observed<F: FnMut(&MatchOutcome)>(
+        &self,
+        reference: &mut PreparedPolarScan,
+        sensor: &mut PreparedPolarScan,
+        mut observe: F,
+    ) -> Result<MatchOutcome, LaserDataError> {
+        let outcome = self.match_prepared(reference, sensor)?;
+        observe(&outcome);
+        Ok(outcome)
+    }
 }
