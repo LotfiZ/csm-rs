@@ -238,6 +238,45 @@ pub struct Params {
     pub debug_verify_tricks: bool,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ParamsError {
+    NonFinite,
+    InvalidRange,
+    InvalidIterationLimit,
+}
+
+impl Params {
+    /// Validate numeric settings before constructing a matcher.
+    pub fn validate(&self) -> Result<(), ParamsError> {
+        let finite = self
+            .first_guess
+            .iter()
+            .chain(self.laser_pose.iter())
+            .all(|v| v.is_finite())
+            && self.reading_bounds.min.is_finite()
+            && self.reading_bounds.max.is_finite()
+            && self.correction_limits.max_angular_deg.is_finite()
+            && self.correction_limits.max_linear.is_finite()
+            && self.stopping.epsilon_xy.is_finite()
+            && self.stopping.epsilon_theta.is_finite();
+        if !finite {
+            return Err(ParamsError::NonFinite);
+        }
+        if self.reading_bounds.min < 0.0
+            || self.reading_bounds.max <= self.reading_bounds.min
+            || self.correction_limits.max_linear < 0.0
+            || self.stopping.epsilon_xy < 0.0
+            || self.stopping.epsilon_theta < 0.0
+        {
+            return Err(ParamsError::InvalidRange);
+        }
+        if self.stopping.max_iterations < 0 {
+            return Err(ParamsError::InvalidIterationLimit);
+        }
+        Ok(())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
