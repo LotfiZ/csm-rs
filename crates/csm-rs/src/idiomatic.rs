@@ -258,6 +258,11 @@ impl Matcher {
     pub fn new(params: Params) -> Self {
         Self { params }
     }
+    /// Create a pose-only matcher for constrained or embedded deployments.
+    pub fn pose_only(mut params: Params) -> Self {
+        params.do_compute_covariance = false;
+        Self { params }
+    }
     pub fn params(&self) -> &Params {
         &self.params
     }

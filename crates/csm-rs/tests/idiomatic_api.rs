@@ -142,6 +142,19 @@ fn prepared_match_observer_receives_outcome() {
 }
 
 #[test]
+fn pose_only_matcher_omits_optional_covariance() {
+    let angles: Vec<f64> = (0..21).map(|i| -1.0 + i as f64 * 0.1).collect();
+    let readings = vec![8.0; angles.len()];
+    let valid = vec![true; angles.len()];
+    let reference = PolarScan::new(&angles, &readings, &valid).unwrap();
+    let sensor = PolarScan::new(&angles, &readings, &valid).unwrap();
+    let outcome = Matcher::pose_only(Params::default())
+        .match_polar(reference, sensor)
+        .unwrap();
+    assert!(outcome.valid && outcome.covariance.is_none());
+}
+
+#[test]
 fn borrowed_polar_rejects_mismatched_lengths() {
     let err = PolarScan::new(&[0.0; 10], &[1.0; 9], &[true; 10]).unwrap_err();
     assert!(matches!(
