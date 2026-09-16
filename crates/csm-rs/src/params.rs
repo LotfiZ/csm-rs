@@ -317,4 +317,14 @@ mod tests {
         assert!(!p.do_compute_covariance);
         assert!(!p.debug_verify_tricks);
     }
+
+    #[test]
+    fn validation_rejects_invalid_limits() {
+        let mut p = Params::default();
+        p.stopping.max_iterations = -1;
+        assert_eq!(p.validate(), Err(ParamsError::InvalidIterationLimit));
+        p = Params::default();
+        p.reading_bounds.max = -1.0;
+        assert_eq!(p.validate(), Err(ParamsError::InvalidRange));
+    }
 }
