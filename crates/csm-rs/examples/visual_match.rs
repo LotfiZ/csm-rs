@@ -7,8 +7,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let valid = vec![true; angles.len()];
     let reference = PolarScan::new(&angles, &readings, &valid)?;
     let sensor = PolarScan::new(&angles, &readings, &valid)?;
-    let mut params = Params::default();
-    params.do_compute_covariance = true;
+    let params = Params {
+        do_compute_covariance: true,
+        ..Params::default()
+    };
     let outcome = Matcher::new(params).match_polar(reference, sensor)?;
     let covariance = outcome
         .covariance
