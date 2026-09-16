@@ -107,9 +107,11 @@ fn prepared_cartesian_scan_updates() {
         .collect();
     let valid = vec![true; points.len()];
     let mut scan = PreparedPolarScan::from_cartesian(&points, &valid).unwrap();
+    let capacity = scan.capacity();
     let updated: Vec<[f64; 2]> = points.iter().map(|p| [p[0] * 0.9, p[1] * 0.9]).collect();
     scan.update_cartesian(&updated, &valid).unwrap();
     assert!((scan.readings()[10] - 7.2).abs() < 1e-9);
+    assert_eq!(scan.capacity(), capacity);
 }
 
 #[test]
