@@ -268,3 +268,25 @@ fn fixture_cases_match_c_reference_and_each_strategy() {
         );
     }
 }
+
+#[test]
+fn restart_fixture_requires_the_restart_shell() {
+    let fixture = read_fixture();
+    let case = fixture
+        .cases
+        .iter()
+        .find(|case| case.name == "restart_probe")
+        .expect("restart fixture case");
+    let params = build_params(&case.params);
+    let (with_restart, _) = run_case(&params, case);
+
+    let mut without_restart_params = params;
+    without_restart_params.restart.enabled = false;
+    let (without_restart, _) = run_case(&without_restart_params, case);
+
+    assert_eq!(with_restart.iterations, 14);
+    assert_eq!(without_restart.iterations, 2);
+    assert!(with_restart.error < without_restart.error);
+    assert!(with_restart.x[0].abs() < 0.02);
+    assert!(without_restart.x[0].abs() > 0.01);
+}

@@ -59,6 +59,26 @@ static void build_trim_case(LDP *ref, LDP *sens) {
     for (int i = 20; i < 40; i++) (*sens)->readings[i] += 1.0;
 }
 
+static void build_oscillation_scan(LDP ld) {
+    unsigned seed = 104;
+    ld->min_theta = MIN_THETA;
+    ld->max_theta = MAX_THETA;
+    for (int i = 0; i < NRAYS; i++) {
+        double t = MIN_THETA + (MAX_THETA - MIN_THETA) * i / (NRAYS - 1);
+        seed = seed * 1664525u + 1013904223u;
+        ld->theta[i] = t;
+        ld->readings[i] = 3.0 + 8.0 * ((seed >> 8) / (double)0x00ffffff);
+        ld->valid[i] = 1;
+    }
+}
+
+static void build_oscillation_case(LDP *ref, LDP *sens) {
+    *ref = ld_alloc_new(NRAYS);
+    *sens = ld_alloc_new(NRAYS);
+    build_oscillation_scan(*ref);
+    build_oscillation_scan(*sens);
+}
+
 static void print_scan_json(const char *name, LDP ld) {
     int i;
     printf("    \"%s\": {\n", name);
@@ -111,7 +131,8 @@ static void print_params_json(struct sm_params *p) {
 static void run_case(const char *name, const double first_guess[3],
                      LDP ref, LDP sens, int max_iterations, int restart,
                      double outliers_max_perc, double outliers_adaptive_order,
-                     double outliers_adaptive_mult, int outliers_remove_doubles) {
+                     double outliers_adaptive_mult, int outliers_remove_doubles,
+                     double epsilon_xy, double epsilon_theta) {
     struct sm_params params;
     struct sm_result result;
     struct option *ops = options_allocate(32);
@@ -124,6 +145,8 @@ static void run_case(const char *name, const double first_guess[3],
     params.first_guess[1] = first_guess[1];
     params.first_guess[2] = first_guess[2];
     params.max_iterations = max_iterations;
+    params.epsilon_xy = epsilon_xy;
+    params.epsilon_theta = epsilon_theta;
     params.restart = restart;
     params.outliers_maxPerc = outliers_max_perc;
     params.outliers_adaptive_order = outliers_adaptive_order;
@@ -162,19 +185,22 @@ int main(void) {
     printf("{\n");
     printf("  \"schema\": \"csm-rs-fixture/v1\",\n");
     printf("  \"cases\": [\n");
-    run_case("identity", zero_guess, ref, sens, 1000, 1, 0.95, 0.7, 2.0, 1);
+    run_case("identity", zero_guess, ref, sens, 1000, 1, 0.95, 0.7, 2.0, 1,
+        0.0001, 0.0001);
 
     /* Percentile-only trim: the twenty perturbed rays have a positive
      * point-to-line error, while the adaptive limit is disabled at order 1. */
     build_trim_case(&ref, &sens);
     printf(",\n");
-    run_case("percentile_trim", zero_guess, ref, sens, 1, 0, 0.5, 1.0, 2.0, 0);
+    run_case("percentile_trim", zero_guess, ref, sens, 1, 0, 0.5, 1.0, 2.0, 0,
+        0.0001, 0.0001);
 
     /* Adaptive-only trim: maxPerc is disabled at order 1, leaving the
      * order-0.7, multiplier-2 threshold to reject the same outliers. */
     build_trim_case(&ref, &sens);
     printf(",\n");
-    run_case("adaptive_trim", zero_guess, ref, sens, 1, 0, 1.0, 0.7, 2.0, 0);
+    run_case("adaptive_trim", zero_guess, ref, sens, 1, 0, 1.0, 0.7, 2.0, 0,
+        0.0001, 0.0001);
 
     /* A translated first guess makes several sensor rays choose the same
      * reference ray. The fixed three-times-distance duplicate rule removes
@@ -185,7 +211,18 @@ int main(void) {
     build_scan(sens);
     printf(",\n");
     run_case("duplicate_correspondence", translated_guess, ref, sens,
-        1, 0, 0.95, 0.7, 2.0, 1);
+        1, 0, 0.95, 0.7, 2.0, 1, 0.0001, 0.0001);
+    printf(",\n");
+    run_case("restart_probe", translated_guess, ref, sens,
+        1, 1, 0.95, 0.7, 2.0, 1, 0.0001, 0.0001);
+
+    static const double oscillating_guess[3] = {0.0, 1.0, 0.0};
+    build_oscillation_case(&ref, &sens);
+    printf(",\n");
+    run_case("oscillation", oscillating_guess, ref, sens,
+        /* Zero thresholds make the repeated hash, rather than convergence,
+         * responsible for the early exit. */
+        100, 0, 1.0, 1.0, 2.0, 0, 0.0, 0.0);
     printf("  ]\n");
     printf("}\n");
     return 0;
