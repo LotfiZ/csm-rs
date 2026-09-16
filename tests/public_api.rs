@@ -465,3 +465,66 @@ fn cartesian_derived_bearings_follow_input_order() {
     let angles = scan.bearings();
     assert!(angles.windows(2).all(|w| w[1] > w[0]));
 }
+
+#[test]
+fn converged_termination_is_reported_as_accepted() {
+    let (angles, readings, valid) = polar(21, 0.0);
+    let reference = PolarScan::new(&angles, &readings, &valid).unwrap();
+    let sensor = PolarScan::new(&angles, &readings, &valid).unwrap();
+    let outcome = Matcher::new(Params::default())
+        .unwrap()
+        .match_polar(reference, sensor)
+        .unwrap();
+    assert_eq!(outcome.termination, TerminationReason::Converged);
+    assert!(outcome.accepted());
+    assert_eq!(outcome.candidate(), Some(outcome.pose));
+}
+
+#[test]
+fn iteration_exhaustion_reports_a_candidate_not_an_acceptance() {
+    let (angles, reference_readings, valid) = polar(41, 0.0);
+    let sensor_readings: Vec<f64> = angles
+        .iter()
+        .map(|&a| 8.0 + 0.5 * (3.0 * (a + 0.10)).sin())
+        .collect();
+    let reference = PolarScan::new(&angles, &reference_readings, &valid).unwrap();
+    let sensor = PolarScan::new(&angles, &sensor_readings, &valid).unwrap();
+    let params = Params {
+        stopping: csm_rs::StoppingCriteria {
+            max_iterations: 2,
+            ..Params::default().stopping
+        },
+        restart: csm_rs::RestartParams {
+            enabled: false,
+            ..Params::default().restart
+        },
+        ..Params::default()
+    };
+    let outcome = Matcher::new(params)
+        .unwrap()
+        .match_polar(reference, sensor)
+        .unwrap();
+    assert_eq!(outcome.termination, TerminationReason::IterationLimit);
+    assert!(!outcome.accepted());
+    let candidate = outcome.candidate().expect("a candidate pose is available");
+    assert!(candidate.is_finite());
+    assert!(outcome.iterations > 0);
+    assert!(outcome.nvalid > 0);
+}
+
+#[test]
+fn no_correspondence_reports_candidate_diagnostics() {
+    let (angles, _, valid) = polar(21, 0.0);
+    let reference = PolarScan::new(&angles, &[5.0; 21], &valid).unwrap();
+    let sensor = PolarScan::new(&angles, &[6.0; 21], &valid).unwrap();
+    let mut params = Params::default();
+    params.correspondence.max_dist = 0.1;
+    let outcome = Matcher::new(params)
+        .unwrap()
+        .match_polar(reference, sensor)
+        .unwrap();
+    assert!(!outcome.valid);
+    assert_eq!(outcome.termination, TerminationReason::NoCorrespondences);
+    assert!(!outcome.accepted());
+    assert!(outcome.candidate().is_some());
+}

@@ -2,6 +2,7 @@ use crate::laser_data::LaserData;
 use crate::math::corr_hash;
 use crate::params::{CorrespondenceSearch, DistanceMetric, Params};
 use crate::icp::sm_icp;
+use crate::matching::TerminationReason;
 use crate::result::SmResult;
 use serde::Deserialize;
 
@@ -604,4 +605,28 @@ fn fixture_corpus_covers_reference_logs_and_edge_cases() {
         .expect("non-convergence fixture case");
     assert_eq!(non_convergence.params.max_iterations, 1);
     assert!(non_convergence.expected.iterations > non_convergence.params.max_iterations);
+}
+
+#[test]
+fn oscillation_fixture_reports_cycle_detection() {
+    let fixture = read_fixture();
+    let case = fixture
+        .cases
+        .iter()
+        .find(|case| case.name == "oscillation")
+        .expect("oscillation fixture case");
+    let params = build_params(&case.params);
+    let mut laser_ref = build_scan(&case.laser_ref);
+    let mut laser_sens = build_scan(&case.laser_sens);
+    let mut result = SmResult::default();
+    let termination = sm_icp(
+        &params,
+        case.params.first_guess,
+        &mut laser_ref,
+        &mut laser_sens,
+        &mut result,
+    )
+    .expect("oscillation fixture scans must pass input validation");
+    assert_eq!(termination, TerminationReason::CycleDetected);
+    assert!(result.valid, "cycle termination still keeps the best candidate");
 }

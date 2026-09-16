@@ -12,6 +12,11 @@
 - Support ordered Cartesian scans through the same matching and configuration
   contracts, with supplied or derived (`atan2`) bearings, preserved missing
   returns, and no silent sorting ([#38](https://github.com/LotfiZ/csm-rs/issues/38)).
+- Report actual termination reasons (convergence, iteration exhaustion,
+  insufficient geometry, no correspondences, cycles, numerical failure) instead
+  of inferring from counters, and preserve candidate poses, counts, and
+  residuals after unsuccessful termination
+  ([#39](https://github.com/LotfiZ/csm-rs/issues/39)).
 - Documented the coordinate contract: metres, radians, scan ordering, sensor
   origin, and the sensor-to-reference transform composition.
 - Retained `PreparedPolarScan`/`PreparedMatcher` reusable storage and optional
