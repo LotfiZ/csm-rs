@@ -210,21 +210,24 @@ impl PreparedMatcher {
     }
 
     /// Match once and report the accepted result as a final snapshot.
-    pub fn match_once_traced<F: FnMut(IterationSnapshot) + 'static>(
+    pub fn match_once_traced<F: FnMut(IterationSnapshot)>(
         &mut self,
         mut observe: F,
     ) -> Result<MatchOutcome, LaserDataError> {
-        self.scratch.observer = Some(Box::new(move |iteration, pose, error, nvalid| {
+        self.scratch.observer = None;
+        self.scratch.trace_events.clear();
+        self.scratch.trace_enabled = true;
+        let outcome = self.match_once();
+        self.scratch.trace_enabled = false;
+        let outcome = outcome?;
+        for (iteration, pose, error, nvalid) in self.scratch.trace_events.drain(..) {
             observe(IterationSnapshot {
                 iteration,
                 pose,
                 error,
                 valid_correspondences: nvalid,
             });
-        }));
-        let outcome = self.match_once();
-        self.scratch.observer = None;
-        let outcome = outcome?;
+        }
         Ok(outcome)
     }
 }

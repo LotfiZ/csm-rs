@@ -2,8 +2,6 @@ use csm_rs::{
     CartesianScan, MatchOutcome, MatchStatus, Matcher, Params, PolarScan, PreparedMatcher,
     PreparedPolarScan, SmResult,
 };
-use std::cell::Cell;
-use std::rc::Rc;
 
 #[test]
 fn borrowed_polar_match_preserves_inputs() {
@@ -334,13 +332,12 @@ fn prepared_matcher_reuses_owned_scans() {
     let mut result = csm_rs::SmResult::default();
     workspace.match_once_into(&mut result).unwrap();
     assert!(result.valid);
-    let snapshots = Rc::new(Cell::new(0));
-    let snapshot_count = Rc::clone(&snapshots);
+    let mut snapshots = 0;
     workspace
-        .match_once_traced(move |snapshot| {
-            snapshot_count.set(snapshot_count.get() + 1);
+        .match_once_traced(|snapshot| {
+            snapshots += 1;
             assert!(snapshot.pose.iter().all(|v| v.is_finite()));
         })
         .unwrap();
-    assert!(snapshots.get() > 0);
+    assert!(snapshots > 0);
 }
