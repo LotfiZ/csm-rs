@@ -11,7 +11,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         PolarScan::new(&angles, &readings, &valid)?,
         PolarScan::new(&angles, &readings, &valid)?,
     )?;
-    let body = format!("<h1>csm-rs interactive match</h1><p>pose={:?}, valid={}</p><p>This page is served by the Rust matcher example.</p>", outcome.pose, outcome.valid);
+    let body = format!("<!doctype html><meta charset='utf-8'><title>csm-rs</title><style>body{{font:16px sans-serif;background:#111827;color:#eee;max-width:720px;margin:2rem auto}}svg{{width:100%;background:#0b1220}}button{{margin:.5rem;padding:.5rem}}</style><h1>csm-rs interactive match</h1><svg id='view' viewBox='0 0 600 300'><circle id='robot' cx='300' cy='150' r='8' fill='#f59e0b'/></svg><p>pose={:?}, valid={}</p><button id='play'>play</button><button id='reset'>reset</button><script>let x=300,timer;const r=document.querySelector('#robot');function draw(){{r.setAttribute('cx',x)}}document.querySelector('#play').onclick=()=>{{clearInterval(timer);timer=setInterval(()=>{{x=x>560?40:x+4;draw()}},30)}};document.querySelector('#reset').onclick=()=>{{clearInterval(timer);x=300;draw()}};draw();</script>", outcome.pose, outcome.valid);
     let listener = TcpListener::bind("127.0.0.1:7878")?;
     println!("open http://127.0.0.1:7878");
     for mut stream in listener.incoming().flatten() {
