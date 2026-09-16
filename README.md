@@ -139,6 +139,12 @@ Prepared scans can be refreshed in place with `update` or
 outcome, which is suitable for metrics, logging, or a UI adapter without a
 runtime logging dependency.
 
+`MatchOutcome::termination` identifies whether a match converged, reached the
+iteration limit, found no correspondences, or failed for another reason.
+`MatchOutcome::covariance_status` separately reports disabled, computed, and
+failed uncertainty diagnostics, so an accepted pose remains usable when its
+optional covariance cannot be produced.
+
 For a fixed-shape stream, `Matcher::prepare` retains the scan and ICP
 workspace across frames:
 
