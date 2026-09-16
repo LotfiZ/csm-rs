@@ -84,6 +84,28 @@ The example simulates a robot scanning a square room. It needs no input files,
 extra dependencies, or C installation. Change `FIRST_SENSOR_POSE` in
 `crates/csm-rs/examples/scan_matching.rs` to try another small movement.
 
+The idiomatic API borrows application buffers and returns a typed outcome:
+
+```rust
+use csm_rs::{Matcher, Params, PolarScan};
+
+let reference = PolarScan::new(&angles, &reference_readings, &valid)?;
+let sensor = PolarScan::new(&angles, &sensor_readings, &valid)?;
+let outcome = Matcher::new(Params::default()).match_polar(reference, sensor)?;
+if outcome.converged() {
+    println!("pose = {:?}", outcome.pose);
+}
+```
+
+For fixed-rate applications, create `PreparedPolarScan` values once and reuse
+them with `match_prepared` or `match_prepared_into`. Ordered Cartesian points
+are also accepted through `CartesianScan`. To generate a browser-viewable SVG
+demonstration, run:
+
+```sh
+cargo run --release -p csm-rs --example visual_match > match.svg
+```
+
 Regenerate the corpus with the C reference source checked out at
 `/path/to/csm-source`:
 
