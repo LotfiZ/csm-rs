@@ -36,7 +36,7 @@ pub mod solver;
 
 pub use idiomatic::{
     CartesianScan, CovarianceStatus, IterationSnapshot, MatchOutcome, MatchStatus, Matcher,
-    PolarScan, PreparedMatcher, PreparedPolarScan,
+    PolarScan, PreparedMatcher, PreparedPolarScan, TerminationReason,
 };
 pub use laser_data::{LaserData, LaserDataError};
 pub use params::{Params, ParamsError};

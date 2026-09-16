@@ -203,6 +203,15 @@ impl PreparedMatcher {
         } else {
             CovarianceStatus::Failed
         };
+        outcome.termination = if outcome.valid {
+            TerminationReason::Converged
+        } else if outcome.nvalid == 0 {
+            TerminationReason::NoCorrespondences
+        } else if outcome.iterations >= self.matcher.params.stopping.max_iterations {
+            TerminationReason::IterationLimit
+        } else {
+            TerminationReason::Failed
+        };
         Ok(outcome)
     }
 
@@ -403,6 +412,7 @@ pub struct MatchOutcome {
     pub dx_dy_reference: Option<Matrix>,
     pub dx_dy_sensor: Option<Matrix>,
     pub covariance_status: CovarianceStatus,
+    pub termination: TerminationReason,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -411,6 +421,15 @@ pub enum CovarianceStatus {
     Disabled,
     Computed,
     Failed,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum TerminationReason {
+    #[default]
+    Failed,
+    Converged,
+    NoCorrespondences,
+    IterationLimit,
 }
 
 impl MatchOutcome {
@@ -458,6 +477,7 @@ impl From<SmResult> for MatchOutcome {
             dx_dy_reference: result.dx_dy1,
             dx_dy_sensor: result.dx_dy2,
             covariance_status: CovarianceStatus::Disabled,
+            termination: TerminationReason::Failed,
         }
     }
 }
