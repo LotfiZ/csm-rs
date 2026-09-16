@@ -11,6 +11,9 @@
   numeric range checks.
 - Added explicit Cartesian beam angles with duplicate-bearing validation.
 - Added typed `MatchStatus` and covariance/derivative outputs.
+- Added explicit covariance and termination diagnostics, including iteration
+  limit and no-correspondence outcomes.
+- Removed the inherited 10,000-ray ceiling from idiomatic scan validation.
 - Added a dependency-free interactive HTML visual example and idiomatic API examples.
 - Added Linux x86_64/aarch64 CI checks and an MSRV check.
 

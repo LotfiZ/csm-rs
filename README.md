@@ -115,11 +115,12 @@ workspace reuse are explicit.
 
 For fixed-rate applications, create `PreparedPolarScan` values once and reuse
 them with `match_prepared` or `match_prepared_into`. Ordered Cartesian points
-are also accepted through `CartesianScan`. To generate a browser-viewable SVG
+are also accepted through `CartesianScan`; the idiomatic validator has no
+artificial upper ray-count limit. To generate a browser-viewable HTML
 demonstration, run:
 
 ```sh
-cargo run --release -p csm-rs --example visual_match > match.svg
+cargo run --release -p csm-rs --example visual_match > match.html
 ```
 
 To run the local browser-backed demo instead:
