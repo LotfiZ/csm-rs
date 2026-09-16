@@ -77,5 +77,5 @@ done
 gcc $CFLAGS "$(dirname "$0")/generate.c" "$OBJS"/*.o \
     -L"$LIBDIR" -lgsl -lgslcblas -lm -o "$WORK/generate"
 
-LD_LIBRARY_PATH="$LIBDIR" "$WORK/generate" > "$OUT"
+LD_LIBRARY_PATH="$LIBDIR" "$WORK/generate" "$CSM_SRC" > "$OUT"
 echo "fixture written to $OUT" >&2

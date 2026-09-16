@@ -4,6 +4,11 @@ use csm_rs::params::{CorrespondenceSearch, DistanceMetric, Params};
 use csm_rs::{sm_icp, SmResult};
 use serde::Deserialize;
 
+const POSE_TOLERANCE: f64 = 1e-9;
+const ERROR_TOLERANCE: f64 = 1e-9;
+const UPSTREAM_ERROR_TOLERANCE: f64 = 2e-9;
+const COVARIANCE_RELATIVE_TOLERANCE: f64 = 1e-6;
+
 #[derive(Debug, Deserialize)]
 struct Fixture {
     schema: String,
@@ -13,6 +18,8 @@ struct Fixture {
 #[derive(Debug, Deserialize)]
 struct Case {
     name: String,
+    #[serde(default)]
+    category: String,
     params: FixtureParams,
     laser_ref: FixtureScan,
     laser_sens: FixtureScan,
@@ -23,7 +30,11 @@ struct Case {
 struct FixtureScan {
     min_theta: f64,
     max_theta: f64,
-    readings: Vec<f64>,
+    #[serde(default)]
+    theta: Vec<f64>,
+    readings: Vec<Option<f64>>,
+    #[serde(default)]
+    valid: Vec<i32>,
     #[serde(default)]
     readings_sigma: Vec<Option<f64>>,
     #[serde(default)]
@@ -71,6 +82,7 @@ struct ExpectedResult {
     error: f64,
     iterations: i32,
     correspondence_hash: u32,
+    first_correspondence_hash: u32,
     nvalid: i32,
     #[serde(default)]
     cov_x: Option<[[f64; 3]; 3]>,
@@ -87,9 +99,20 @@ fn read_fixture() -> Fixture {
 
 fn build_scan(scan: &FixtureScan) -> LaserData {
     let mut result = LaserData::new(scan.readings.len(), scan.min_theta, scan.max_theta);
-    for (i, &reading) in scan.readings.iter().enumerate() {
-        result.valid[i] = true;
-        result.readings[i] = reading;
+    if !scan.theta.is_empty() {
+        assert_eq!(scan.theta.len(), result.nrays);
+        result.theta.clone_from(&scan.theta);
+    }
+    if scan.valid.is_empty() {
+        result.valid.fill(true);
+    } else {
+        assert_eq!(scan.valid.len(), result.nrays);
+        for (valid, &value) in result.valid.iter_mut().zip(&scan.valid) {
+            *valid = value != 0;
+        }
+    }
+    for (reading, value) in result.readings.iter_mut().zip(&scan.readings) {
+        *reading = value.unwrap_or(f64::NAN);
     }
     for (i, sigma) in scan.readings_sigma.iter().enumerate() {
         if let Some(sigma) = sigma {
@@ -165,7 +188,7 @@ fn correspondence_keys(scan: &LaserData) -> Vec<Option<(i32, i32)>> {
 fn assert_relative(actual: f64, expected: f64, label: &str) {
     let scale = expected.abs().max(1e-12);
     assert!(
-        (actual - expected).abs() <= 1e-6 * scale,
+        (actual - expected).abs() <= COVARIANCE_RELATIVE_TOLERANCE * scale,
         "{label}: {actual} != {expected}"
     );
 }
@@ -210,8 +233,15 @@ fn fixture_cases_match_c_reference_and_each_strategy() {
             case.name
         );
         assert_eq!(result.nvalid, case.expected.nvalid, "case {}", case.name);
+        // C and Rust accumulate imported log errors through different native
+        // math paths; keep the wider tolerance local to those upstream cases.
+        let error_tolerance = if case.category == "upstream_misc_tests" {
+            UPSTREAM_ERROR_TOLERANCE
+        } else {
+            ERROR_TOLERANCE
+        };
         assert!(
-            (result.error - case.expected.error).abs() <= 1e-9,
+            (result.error - case.expected.error).abs() <= error_tolerance,
             "case {}: {} != {}",
             case.name,
             result.error,
@@ -219,7 +249,7 @@ fn fixture_cases_match_c_reference_and_each_strategy() {
         );
         for (actual, expected) in result.x.iter().zip(case.expected.x) {
             assert!(
-                (actual - expected).abs() <= 1e-9,
+                (actual - expected).abs() <= POSE_TOLERANCE,
                 "case {}: {actual} != {expected}",
                 case.name
             );
@@ -230,6 +260,19 @@ fn fixture_cases_match_c_reference_and_each_strategy() {
             corr_hash(&final_keys),
             case.expected.correspondence_hash,
             "case {}: final correspondence hash",
+            case.name
+        );
+
+        // Compare the configured search at the first iteration, before
+        // restart or later correspondence changes can hide a divergence.
+        let mut first_params = params.clone();
+        first_params.stopping.max_iterations = 1;
+        first_params.restart.enabled = false;
+        let (_, first_sens) = run_case(&first_params, case);
+        assert_eq!(
+            corr_hash(&correspondence_keys(&first_sens)),
+            case.expected.first_correspondence_hash,
+            "case {}: first correspondence hash",
             case.name
         );
 
@@ -276,6 +319,27 @@ fn fixture_cases_match_c_reference_and_each_strategy() {
             continue;
         }
 
+        // The upstream stallo2 regression log is intentionally retained as a
+        // smart-path corpus case even though C's smart and naive searches
+        // diverge on its invalid sectors. Its configured path and first hash
+        // are checked against C above; synthetic cases retain the strategy
+        // equivalence property below.
+        if case.name == "upstream_failure1_stallo2" {
+            let mut tricks_params = params.clone();
+            tricks_params.correspondence.search = CorrespondenceSearch::Tricks;
+            let (_, tricks_sens) = run_case(&tricks_params, case);
+            let mut naive_params = params.clone();
+            naive_params.correspondence.search = CorrespondenceSearch::Naive;
+            let (_, naive_sens) = run_case(&naive_params, case);
+            assert_ne!(
+                correspondence_keys(&tricks_sens),
+                correspondence_keys(&naive_sens),
+                "case {}: upstream C corpus is expected to expose its known smart/naive divergence",
+                case.name
+            );
+            continue;
+        }
+
         // Run both strategies through the public seam and compare the final
         // correspondence key/hash as well as the match result, regardless of
         // which strategy the fixture happens to configure.
@@ -302,7 +366,7 @@ fn fixture_cases_match_c_reference_and_each_strategy() {
             case.name
         );
         assert!(
-            (tricks_result.error - naive_result.error).abs() <= 1e-9,
+            (tricks_result.error - naive_result.error).abs() <= ERROR_TOLERANCE,
             "case {}: {} != {}",
             case.name,
             tricks_result.error,
@@ -310,7 +374,7 @@ fn fixture_cases_match_c_reference_and_each_strategy() {
         );
         for (actual, expected) in tricks_result.x.iter().zip(naive_result.x) {
             assert!(
-                (actual - expected).abs() <= 1e-9,
+                (actual - expected).abs() <= POSE_TOLERANCE,
                 "case {}: {actual} != {expected}",
                 case.name
             );
@@ -467,4 +531,67 @@ fn weighting_fixtures_cover_each_branch_and_computed_alpha_fallback() {
             "weight fields should affect the solved pose for {name}"
         );
     }
+}
+
+#[test]
+fn fixture_corpus_covers_reference_logs_and_edge_cases() {
+    let fixture = read_fixture();
+    let categories: std::collections::BTreeSet<_> = fixture
+        .cases
+        .iter()
+        .map(|case| case.category.as_str())
+        .collect();
+
+    for category in [
+        "upstream_misc_tests",
+        "degenerate_geometry",
+        "non_convergence",
+    ] {
+        assert!(categories.contains(category), "missing {category} corpus");
+    }
+
+    let upstream: Vec<_> = fixture
+        .cases
+        .iter()
+        .filter(|case| case.category == "upstream_misc_tests")
+        .collect();
+    assert_eq!(upstream.len(), 2);
+    assert!(upstream
+        .iter()
+        .all(|case| !case.laser_ref.theta.is_empty() && !case.laser_ref.valid.is_empty()));
+    assert!(upstream.iter().any(|case| {
+        case.laser_ref.readings.iter().any(Option::is_none)
+            || case.laser_sens.readings.iter().any(Option::is_none)
+    }));
+
+    let degenerate = fixture
+        .cases
+        .iter()
+        .find(|case| case.category == "degenerate_geometry")
+        .expect("degenerate geometry fixture case");
+    assert_eq!(
+        degenerate.laser_ref.theta.len(),
+        degenerate.laser_ref.readings.len()
+    );
+    assert_eq!(
+        degenerate.laser_ref.valid.len(),
+        degenerate.laser_ref.readings.len()
+    );
+    assert_eq!(
+        degenerate
+            .laser_ref
+            .valid
+            .iter()
+            .filter(|&&value| value != 0)
+            .count(),
+        3
+    );
+
+    let non_convergence = fixture
+        .cases
+        .iter()
+        .find(|case| case.category == "non_convergence")
+        .expect("non-convergence fixture case");
+    assert_eq!(non_convergence.params.max_iterations, 1);
+    assert!(non_convergence.expected.iterations > non_convergence.params.max_iterations);
 }

@@ -89,6 +89,39 @@ static void build_alpha_rejection_case(LDP *ref, LDP *sens) {
     }
 }
 
+/* A minimal-support scan pair: only three collinear points are valid. This
+ * stays at the lower edge of the C validity contract and makes the
+ * point-to-point normal equations singular on purpose. */
+static void build_degenerate_scan(LDP ld) {
+    const int valid_indices[] = {8, 15, 22};
+    const int valid_count = (int)(sizeof(valid_indices) / sizeof(valid_indices[0]));
+    const double min_theta = -1.0;
+    const double max_theta = 1.0;
+
+    ld->min_theta = min_theta;
+    ld->max_theta = max_theta;
+    for (int i = 0; i < ld->nrays; i++) {
+        double t = min_theta + (max_theta - min_theta) * i / (ld->nrays - 1);
+        ld->theta[i] = t;
+        ld->readings[i] = 5.0;
+        ld->valid[i] = 0;
+    }
+    for (int i = 0; i < valid_count; i++) {
+        int index = valid_indices[i];
+        ld->valid[index] = 1;
+        /* These points all lie on x = 4.0 in Cartesian coordinates. */
+        double t = ld->theta[index];
+        ld->readings[index] = 4.0 / cos(t);
+    }
+}
+
+static void build_degenerate_case(LDP *ref, LDP *sens) {
+    *ref = ld_alloc_new(30);
+    *sens = ld_alloc_new(30);
+    build_degenerate_scan(*ref);
+    build_degenerate_scan(*sens);
+}
+
 static int any_values_present(const double *values, int count) {
     for (int i = 0; i < count; i++) {
         if (!isnan(values[i])) return 1;
@@ -101,6 +134,13 @@ static void print_double_array(const double *values, int count, int allow_null) 
         if (i) printf(", ");
         if (allow_null && isnan(values[i])) printf("null");
         else printf("%.17g", values[i]);
+    }
+}
+
+static void print_int_array(const int *values, int count) {
+    for (int i = 0; i < count; i++) {
+        if (i) printf(", ");
+        printf("%d", values[i]);
     }
 }
 
@@ -120,12 +160,20 @@ static void print_matrix_json(const gsl_matrix *matrix) {
     printf("]");
 }
 
-static void print_scan_json(const char *name, LDP ld) {
+static void print_scan_json(const char *name, LDP ld, int include_input_metadata) {
     printf("    \"%s\": {\n", name);
     printf("      \"min_theta\": %.17g,\n", ld->min_theta);
     printf("      \"max_theta\": %.17g,\n", ld->max_theta);
+    if (include_input_metadata) {
+        printf("      \"theta\": [");
+        print_double_array(ld->theta, ld->nrays, 0);
+        printf("],\n");
+        printf("      \"valid\": [");
+        print_int_array(ld->valid, ld->nrays);
+        printf("],\n");
+    }
     printf("      \"readings\": [");
-    print_double_array(ld->readings, ld->nrays, 0);
+    print_double_array(ld->readings, ld->nrays, 1);
     printf("]");
     if (any_values_present(ld->readings_sigma, ld->nrays)) {
         printf(",\n      \"readings_sigma\": [");
@@ -139,6 +187,20 @@ static void print_scan_json(const char *name, LDP ld) {
     }
     printf("\n");
     printf("    }");
+}
+
+static LDP clone_scan(LDP source) {
+    LDP copy = ld_alloc_new(source->nrays);
+    copy->min_theta = source->min_theta;
+    copy->max_theta = source->max_theta;
+    memcpy(copy->theta, source->theta, sizeof(double) * source->nrays);
+    memcpy(copy->valid, source->valid, sizeof(int) * source->nrays);
+    memcpy(copy->readings, source->readings, sizeof(double) * source->nrays);
+    memcpy(copy->readings_sigma, source->readings_sigma,
+           sizeof(double) * source->nrays);
+    memcpy(copy->true_alpha, source->true_alpha,
+           sizeof(double) * source->nrays);
+    return copy;
 }
 
 /* Print the params sm_icp actually consumes, in C field names. The Rust
@@ -199,6 +261,7 @@ struct CaseConfig {
     int outliers_remove_doubles;
     double epsilon_xy;
     double epsilon_theta;
+    double max_correspondence_dist;
     int do_compute_covariance;
     struct FeatureFlags features;
 };
@@ -214,6 +277,7 @@ static struct CaseConfig default_case_config(void) {
         .outliers_remove_doubles = 1,
         .epsilon_xy = 0.0001,
         .epsilon_theta = 0.0001,
+        .max_correspondence_dist = 2.0,
         .do_compute_covariance = 0,
         .features = {
             .use_corr_tricks = 1,
@@ -228,8 +292,8 @@ static struct CaseConfig default_case_config(void) {
     };
 }
 
-static void run_case(const char *name, LDP ref, LDP sens,
-                     const struct CaseConfig *config) {
+static void run_case(const char *name, const char *category, LDP ref, LDP sens,
+                     const struct CaseConfig *config, int include_input_metadata) {
     struct sm_params params;
     struct sm_result result;
     struct option *ops = options_allocate(32);
@@ -244,6 +308,7 @@ static void run_case(const char *name, LDP ref, LDP sens,
     params.max_iterations = config->max_iterations;
     params.epsilon_xy = config->epsilon_xy;
     params.epsilon_theta = config->epsilon_theta;
+    params.max_correspondence_dist = config->max_correspondence_dist;
     params.restart = config->restart;
     params.outliers_maxPerc = config->outliers_max_perc;
     params.outliers_adaptive_order = config->outliers_adaptive_order;
@@ -259,22 +324,52 @@ static void run_case(const char *name, LDP ref, LDP sens,
     params.do_alpha_test_thresholdDeg = config->features.alpha_test_threshold_deg;
     params.do_compute_covariance = config->do_compute_covariance;
 
-    sm_icp(&params, &result);
-
     printf("  {\n");
     printf("    \"name\": \"%s\",\n", name);
+    printf("    \"category\": \"%s\",\n", category);
     print_params_json(&params);
-    print_scan_json("laser_ref", ref);
+    print_scan_json("laser_ref", ref, include_input_metadata);
     printf(",\n");
-    print_scan_json("laser_sens", sens);
+    print_scan_json("laser_sens", sens, include_input_metadata);
     printf(",\n");
+
+    /* Capture the configured search's first correspondence set on clean
+     * copies. This remains meaningful for cases where C's smart and naive
+     * searches intentionally take different paths later in the loop. */
+    LDP first_ref = clone_scan(ref);
+    LDP first_sens = clone_scan(sens);
+    struct sm_params first_params = params;
+    struct sm_result first_result;
+    first_params.laser_ref = first_ref;
+    first_params.laser_sens = first_sens;
+    first_params.max_iterations = 1;
+    first_params.restart = 0;
+    first_params.do_compute_covariance = 0;
+    sm_icp(&first_params, &first_result);
+    unsigned int first_correspondence_hash = ld_corr_hash(first_sens);
+    ld_free(first_ref);
+    ld_free(first_sens);
+
+    /* Serialize the input state before sm_icp mutates derived fields and
+     * visibility flags. The expected correspondence hash below is read from
+     * the post-match state, but the scans must remain reusable as inputs. */
+    sm_icp(&params, &result);
+
     printf("    \"expected\": {\n");
     printf("      \"valid\": %s,\n", result.valid ? "true" : "false");
-    printf("      \"x\": [%.17g, %.17g, %.17g],\n",
-        result.x[0], result.x[1], result.x[2]);
-    printf("      \"error\": %.17g,\n", result.error);
+    if (result.valid) {
+        printf("      \"x\": [%.17g, %.17g, %.17g],\n",
+            result.x[0], result.x[1], result.x[2]);
+        printf("      \"error\": %.17g,\n", result.error);
+    } else {
+        /* C leaves x/error unspecified on a failed match. Normalize those
+         * fields so a failure fixture remains deterministic and portable. */
+        printf("      \"x\": [0, 0, 0],\n");
+        printf("      \"error\": 0,\n");
+    }
     printf("      \"iterations\": %d,\n", result.iterations);
     printf("      \"correspondence_hash\": %u,\n", ld_corr_hash(sens));
+    printf("      \"first_correspondence_hash\": %u,\n", first_correspondence_hash);
     printf("      \"nvalid\": %d", result.nvalid);
     if (result.valid && config->do_compute_covariance) {
         printf(",\n      \"cov_x\": ");
@@ -287,6 +382,45 @@ static void run_case(const char *name, LDP ref, LDP sens,
     printf("\n");
     printf("    }\n");
     printf("  }\n");
+}
+
+static int load_scan_pair(const char *path, LDP *ref, LDP *sens) {
+    FILE *input = fopen(path, "r");
+    if (!input) {
+        fprintf(stderr, "Could not open upstream fixture: %s\n", path);
+        return 0;
+    }
+
+    *ref = ld_from_json_stream(input);
+    *sens = *ref ? ld_from_json_stream(input) : 0;
+    fclose(input);
+    if (!*ref || !*sens) {
+        fprintf(stderr, "Could not read two scans from upstream fixture: %s\n", path);
+        if (*ref) ld_free(*ref);
+        if (*sens) ld_free(*sens);
+        *ref = 0;
+        *sens = 0;
+        return 0;
+    }
+    return 1;
+}
+
+static int run_upstream_case(const char *name, const char *path,
+                             int max_iterations, int restart) {
+    LDP ref = 0;
+    LDP sens = 0;
+    if (!load_scan_pair(path, &ref, &sens)) return 0;
+
+    struct CaseConfig config = default_case_config();
+    pose_diff_d(sens->odometry, ref->odometry, config.first_guess);
+    config.max_iterations = max_iterations;
+    config.restart = restart;
+    config.outliers_remove_doubles = 0;
+    printf(",\n");
+    run_case(name, "upstream_misc_tests", ref, sens, &config, 1);
+    ld_free(ref);
+    ld_free(sens);
+    return 1;
 }
 
 static void set_ml_fields(LDP ref) {
@@ -306,7 +440,12 @@ static void set_sigma_fields(LDP sens, int leave_gaps) {
     }
 }
 
-int main(void) {
+int main(int argc, char **argv) {
+    if (argc != 2) {
+        fprintf(stderr, "usage: %s <csm-source-dir>\n", argv[0]);
+        return 2;
+    }
+
     struct CaseConfig config = default_case_config();
 
     LDP ref  = ld_alloc_new(NRAYS);
@@ -317,7 +456,7 @@ int main(void) {
     printf("{\n");
     printf("  \"schema\": \"csm-rs-fixture/v1\",\n");
     printf("  \"cases\": [\n");
-    run_case("identity", ref, sens, &config);
+    run_case("identity", "synthetic_baseline", ref, sens, &config, 0);
 
     /* A deliberately offset, single-iteration match exercises Censi's exact
      * closed-form covariance and both range-derivative matrices. */
@@ -336,7 +475,7 @@ int main(void) {
     config.outliers_remove_doubles = 0;
     config.do_compute_covariance = 1;
     printf(",\n");
-    run_case("covariance", ref, sens, &config);
+    run_case("covariance", "synthetic_covariance", ref, sens, &config, 0);
 
     /* Percentile-only trim: the twenty perturbed rays have a positive
      * point-to-line error, while the adaptive limit is disabled at order 1. */
@@ -348,7 +487,7 @@ int main(void) {
     config.outliers_adaptive_order = 1.0;
     config.outliers_remove_doubles = 0;
     printf(",\n");
-    run_case("percentile_trim", ref, sens, &config);
+    run_case("percentile_trim", "synthetic_outliers", ref, sens, &config, 0);
 
     /* Adaptive-only trim: maxPerc is disabled at order 1, leaving the
      * order-0.7, multiplier-2 threshold to reject the same outliers. */
@@ -359,7 +498,7 @@ int main(void) {
     config.outliers_max_perc = 1.0;
     config.outliers_remove_doubles = 0;
     printf(",\n");
-    run_case("adaptive_trim", ref, sens, &config);
+    run_case("adaptive_trim", "synthetic_outliers", ref, sens, &config, 0);
 
     /* A translated first guess makes several sensor rays choose the same
      * reference ray. The fixed three-times-distance duplicate rule removes
@@ -373,10 +512,10 @@ int main(void) {
     config.max_iterations = 1;
     config.restart = 0;
     printf(",\n");
-    run_case("duplicate_correspondence", ref, sens, &config);
+    run_case("duplicate_correspondence", "synthetic_outliers", ref, sens, &config, 0);
     config.restart = 1;
     printf(",\n");
-    run_case("restart_probe", ref, sens, &config);
+    run_case("restart_probe", "synthetic_restart", ref, sens, &config, 0);
 
     build_oscillation_case(&ref, &sens);
     config = default_case_config();
@@ -391,7 +530,7 @@ int main(void) {
     printf(",\n");
     /* Zero thresholds make the repeated hash, rather than convergence,
      * responsible for the early exit. */
-    run_case("oscillation", ref, sens, &config);
+    run_case("oscillation", "synthetic_oscillation", ref, sens, &config, 0);
 
     /* C's default smart path with the optional orientation and visibility
      * gates enabled. The C tricks routine intentionally omits alpha filtering,
@@ -418,7 +557,7 @@ int main(void) {
     config.outliers_remove_doubles = 0;
     config.features = alpha_tricks_features;
     printf(",\n");
-    run_case("alpha_visibility_tricks", ref, sens, &config);
+    run_case("alpha_visibility_tricks", "synthetic_features", ref, sens, &config, 0);
 
     /* The naive alpha path with a tight angular gate and a slightly changed
      * scan exercises actual orientation rejection. */
@@ -443,7 +582,7 @@ int main(void) {
     config.outliers_remove_doubles = 0;
     config.features = alpha_rejection_features;
     printf(",\n");
-    run_case("alpha_rejection", ref, sens, &config);
+    run_case("alpha_rejection", "synthetic_features", ref, sens, &config, 0);
 
     /* ML weights consume true_alpha on the reference scan. */
     ref = ld_alloc_new(NRAYS);
@@ -472,7 +611,7 @@ int main(void) {
     config.outliers_remove_doubles = 0;
     config.features = ml_features;
     printf(",\n");
-    run_case("ml_weights", ref, sens, &config);
+    run_case("ml_weights", "synthetic_weights", ref, sens, &config, 0);
 
     /* Sigma weights consume readings_sigma on the sensor scan. Include NaN
      * gaps to exercise C's per-ray fallback. */
@@ -502,7 +641,7 @@ int main(void) {
     config.outliers_remove_doubles = 0;
     config.features = sigma_features;
     printf(",\n");
-    run_case("sigma_weights", ref, sens, &config);
+    run_case("sigma_weights", "synthetic_weights", ref, sens, &config, 0);
 
     /* With no true_alpha values, ML falls back to the orientation estimated
      * by the alpha pass. */
@@ -531,7 +670,46 @@ int main(void) {
     config.outliers_remove_doubles = 0;
     config.features = computed_alpha_features;
     printf(",\n");
-    run_case("computed_alpha_weights", ref, sens, &config);
+    run_case("computed_alpha_weights", "synthetic_weights", ref, sens, &config, 0);
+
+    /* Minimal-support geometry stays at C's 10% valid-ray contract and
+     * leaves only three collinear points for the point-to-point solver. */
+    build_degenerate_case(&ref, &sens);
+    config = default_case_config();
+    config.max_iterations = 1;
+    config.restart = 0;
+    config.outliers_max_perc = 1.0;
+    config.outliers_adaptive_order = 1.0;
+    config.outliers_remove_doubles = 0;
+    config.features.use_point_to_line_distance = 0;
+    printf(",\n");
+    run_case("degenerate_geometry", "degenerate_geometry", ref, sens, &config, 1);
+
+    /* With both convergence thresholds disabled, one useful iteration is
+     * followed by the C loop's max-iteration exhaustion path. */
+    ref = ld_alloc_new(NRAYS);
+    sens = ld_alloc_new(NRAYS);
+    build_scan(ref);
+    build_scan(sens);
+    config = default_case_config();
+    config.first_guess[0] = 0.25;
+    config.first_guess[1] = -0.15;
+    config.first_guess[2] = 0.04;
+    config.max_iterations = 1;
+    config.restart = 0;
+    config.outliers_max_perc = 1.0;
+    config.outliers_adaptive_order = 1.0;
+    config.outliers_remove_doubles = 0;
+    config.epsilon_xy = 0.0;
+    config.epsilon_theta = 0.0;
+    printf(",\n");
+    run_case("max_iterations_non_convergence", "non_convergence", ref, sens, &config, 0);
+
+    char path[4096];
+    snprintf(path, sizeof(path), "%s/misc/tests/failure1/stallo2.log", argv[1]);
+    if (!run_upstream_case("upstream_failure1_stallo2", path, 10, 0)) return 1;
+    snprintf(path, sizeof(path), "%s/misc/tests/failure2.json", argv[1]);
+    if (!run_upstream_case("upstream_failure2", path, 10, 0)) return 1;
     printf("  ]\n");
     printf("}\n");
     return 0;
