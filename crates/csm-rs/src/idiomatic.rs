@@ -64,6 +64,53 @@ pub struct PreparedPolarScan {
     data: LaserData,
 }
 
+/// Reusable matching workspace for fixed-size streams.
+///
+/// The scan buffers are owned by the workspace and can be updated in place
+/// between calls. Constructing it up front makes the intended steady-state
+/// ownership explicit for real-time and embedded callers.
+#[derive(Debug)]
+pub struct PreparedMatcher {
+    matcher: Matcher,
+    reference: PreparedPolarScan,
+    sensor: PreparedPolarScan,
+}
+
+impl PreparedMatcher {
+    pub fn new(
+        matcher: Matcher,
+        reference: PreparedPolarScan,
+        sensor: PreparedPolarScan,
+    ) -> Result<Self, LaserDataError> {
+        if reference.is_empty() || sensor.is_empty() {
+            return Err(LaserDataError::NraysOutOfRange);
+        }
+        Ok(Self {
+            matcher,
+            reference,
+            sensor,
+        })
+    }
+
+    pub fn reference(&self) -> &PreparedPolarScan {
+        &self.reference
+    }
+    pub fn reference_mut(&mut self) -> &mut PreparedPolarScan {
+        &mut self.reference
+    }
+    pub fn sensor(&self) -> &PreparedPolarScan {
+        &self.sensor
+    }
+    pub fn sensor_mut(&mut self) -> &mut PreparedPolarScan {
+        &mut self.sensor
+    }
+
+    pub fn match_once(&mut self) -> Result<MatchOutcome, LaserDataError> {
+        self.matcher
+            .match_prepared(&mut self.reference, &mut self.sensor)
+    }
+}
+
 impl PreparedPolarScan {
     pub fn from_polar(
         angles: Vec<f64>,

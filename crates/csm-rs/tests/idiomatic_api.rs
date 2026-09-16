@@ -1,6 +1,6 @@
 use csm_rs::{
-    CartesianScan, MatchOutcome, MatchStatus, Matcher, Params, PolarScan, PreparedPolarScan,
-    SmResult,
+    CartesianScan, MatchOutcome, MatchStatus, Matcher, Params, PolarScan, PreparedMatcher,
+    PreparedPolarScan, SmResult,
 };
 
 #[test]
@@ -186,4 +186,18 @@ fn cartesian_match_preserves_points() {
         .unwrap();
     assert!(outcome.valid);
     assert_eq!(points, before);
+}
+
+#[test]
+fn prepared_matcher_reuses_owned_scans() {
+    let angles: Vec<f64> = (0..21).map(|i| -1.0 + i as f64 * 0.1).collect();
+    let readings = vec![8.0; angles.len()];
+    let valid = vec![true; angles.len()];
+    let reference =
+        PreparedPolarScan::from_polar(angles.clone(), readings.clone(), valid.clone()).unwrap();
+    let sensor = PreparedPolarScan::from_polar(angles, readings, valid).unwrap();
+    let mut workspace =
+        PreparedMatcher::new(Matcher::pose_only(Params::default()), reference, sensor).unwrap();
+    assert!(workspace.match_once().unwrap().valid);
+    assert_eq!(workspace.reference().len(), 21);
 }
