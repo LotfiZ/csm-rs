@@ -3,18 +3,17 @@
 //! C: `sm/csm/icp/icp.c` (`sm_icp`),
 //!     `sm/csm/icp/icp_loop.c` (`icp_loop`, `termination_criterion`)
 //!
-//! Ticket #5 keeps the loop intentionally small: transform the sensor scan,
-//! find correspondences with the selected strategy, solve the closed-form
-//! PlICP update, and stop when the pose correction is below both configured
-//! thresholds. Outlier rejection, oscillation detection, restarts, and
-//! covariance are added by later tickets.
+//! The loop transforms the sensor scan, finds correspondences with the
+//! selected strategy, rejects outliers, solves the closed-form PlICP update,
+//! and stops when the pose correction is below both configured thresholds.
+//! Oscillation detection, restarts, and covariance are added by later tickets.
 
-use crate::correspondence::find_correspondences;
+use crate::correspondence::{find_correspondences, kill_outliers_double, kill_outliers_trim};
 use crate::laser_data::LaserData;
 use crate::math::pose_diff;
 use crate::params::Params;
 use crate::result::SmResult;
-use crate::solver::{compute_next_estimate, correspondence_distance};
+use crate::solver::compute_next_estimate;
 
 /// Run point-to-line ICP through the CSM shell.
 ///
@@ -107,7 +106,24 @@ fn icp_loop(params: &Params, laser_ref: &LaserData, laser_sens: &mut LaserData) 
         laser_sens.compute_world_coords(&x_old);
         find_correspondences(params, laser_ref, laser_sens);
 
-        let nvalid = laser_sens.corr.iter().filter(|corr| corr.valid).count();
+        let nvalid_before = laser_sens.corr.iter().filter(|corr| corr.valid).count();
+        if (nvalid_before as f64) < laser_sens.nrays as f64 * 0.05 {
+            return IcpOutcome {
+                success: false,
+                x: x_new,
+                error: 0.0,
+                iterations: iteration as i32 + 1,
+                nvalid: 0,
+            };
+        }
+
+        // C: `kill_outliers_double()` followed by `kill_outliers_trim()` in
+        // `sm/csm/icp/icp_loop.c`.
+        if params.outliers.remove_doubles {
+            kill_outliers_double(laser_ref, laser_sens);
+        }
+        let trimmed = kill_outliers_trim(&params.outliers, laser_ref, laser_sens);
+        let nvalid = trimmed.nvalid;
         if (nvalid as f64) < laser_sens.nrays as f64 * 0.05 {
             return IcpOutcome {
                 success: false,
@@ -129,9 +145,7 @@ fn icp_loop(params: &Params, laser_ref: &LaserData, laser_sens: &mut LaserData) 
         };
         x_new = next;
 
-        let error = (0..laser_sens.nrays)
-            .filter_map(|i| correspondence_distance(laser_ref, laser_sens, i))
-            .sum();
+        let error = trimmed.total_error;
         last_error = error;
         last_nvalid = nvalid as i32;
         let delta = pose_diff(x_new, x_old);

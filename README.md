@@ -19,10 +19,11 @@ The port is validated *golden-master* against the original C library:
 a throwaway C generator (in `fixture-generator/`, never built by cargo) links
 the reference implementation and emits JSON fixtures (scan pairs + params +
 expected results) checked into `crates/csm-rs/tests/fixtures/`. The public
-tracer path checks pose to 1e-9 and `iterations`/`nvalid` exactly, while the
-crate-internal seam checks that tricks and naive correspondence search
-produce the same keys and hash. The full target validation also covers
-covariance to 1e-6 relative error as those stages land.
+tracer path checks pose to 1e-9 and `iterations`/`nvalid` exactly, including
+fixtures for duplicate removal and both trimming thresholds. The crate-
+internal seam checks that tricks and naive correspondence search produce the
+same keys and hash. The full target validation also covers covariance to
+1e-6 relative error as those stages land.
 
 ## Workspace layout
 

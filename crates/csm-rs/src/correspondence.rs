@@ -15,8 +15,18 @@
 //! revisited with the later alpha-feature ticket.
 
 use crate::laser_data::{CorrespondenceType, LaserData};
-use crate::math::{angle_diff, corr_hash, distance_squared, norm};
-use crate::params::{CorrespondenceSearch, DistanceMetric, Params};
+use crate::math::{angle_diff, corr_hash, distance_squared, distance_to_segment, norm};
+use crate::params::{CorrespondenceSearch, DistanceMetric, OutlierParams, Params};
+
+/// The bookkeeping result produced by CSM's trimming pass.
+///
+/// C: the `total_error` and `valid` outputs of `kill_outliers_trim()` in
+/// `sm/csm/icp/icp_outliers.c`.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct OutlierResult {
+    pub total_error: f64,
+    pub nvalid: usize,
+}
 
 /// Find correspondences using the currently available search strategy.
 ///
@@ -323,6 +333,134 @@ pub(crate) fn find_correspondences_naive(
     }
 }
 
+/// Remove duplicate sensor-to-reference matches, keeping every match within
+/// CSM's fixed three-times-distance rule of the nearest match.
+///
+/// C: `kill_outliers_double()` in `sm/csm/icp/icp_outliers.c`.
+pub(crate) fn kill_outliers_double(laser_ref: &LaserData, laser_sens: &mut LaserData) {
+    const THRESHOLD: f64 = 3.0;
+
+    let mut nearest_distances = vec![1_000_000.0_f64; laser_ref.nrays];
+    let mut sensor_distances = vec![f64::NAN; laser_sens.nrays];
+
+    for (i, correspondence) in laser_sens.corr.iter().enumerate() {
+        if !correspondence.valid {
+            continue;
+        }
+        let Ok(j1) = usize::try_from(correspondence.j1) else {
+            continue;
+        };
+        if j1 >= laser_ref.nrays {
+            continue;
+        }
+        sensor_distances[i] = correspondence.dist2_j1;
+        nearest_distances[j1] = nearest_distances[j1].min(correspondence.dist2_j1);
+    }
+
+    for (i, correspondence) in laser_sens.corr.iter_mut().enumerate() {
+        if !correspondence.valid {
+            continue;
+        }
+        let Ok(j1) = usize::try_from(correspondence.j1) else {
+            continue;
+        };
+        if j1 < laser_ref.nrays
+            && sensor_distances[i] > THRESHOLD * THRESHOLD * nearest_distances[j1]
+        {
+            // C changes only the valid bit in this pass; preserve the other
+            // fields until the trim pass, exactly as `kill_outliers_double()`.
+            correspondence.valid = false;
+        }
+    }
+}
+
+/// Trim correspondences using the fixed-percentile and adaptive thresholds.
+///
+/// C: `kill_outliers_trim()` in `sm/csm/icp/icp_outliers.c`.
+pub(crate) fn kill_outliers_trim(
+    params: &OutlierParams,
+    laser_ref: &LaserData,
+    laser_sens: &mut LaserData,
+) -> OutlierResult {
+    let mut distances_by_sensor = vec![f64::NAN; laser_sens.nrays];
+    let mut distances = Vec::new();
+
+    for (i, distance_slot) in distances_by_sensor.iter_mut().enumerate() {
+        if !laser_sens.corr[i].valid {
+            continue;
+        }
+        let Some(distance) = correspondence_distance(laser_ref, laser_sens, i) else {
+            continue;
+        };
+        *distance_slot = distance;
+        distances.push(distance);
+    }
+
+    if distances.is_empty() {
+        return OutlierResult {
+            total_error: 0.0,
+            nvalid: 0,
+        };
+    }
+
+    distances.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+    let max_percentile = percentile_index(distances.len(), params.max_perc);
+    let adaptive_percentile = percentile_index(distances.len(), params.adaptive_order);
+    let percentile_error_limit = distances[max_percentile];
+    let adaptive_error_limit = params.adaptive_mult * distances[adaptive_percentile];
+    let error_limit = percentile_error_limit.min(adaptive_error_limit);
+
+    let mut total_error = 0.0;
+    let mut nvalid = 0;
+    for (i, correspondence) in laser_sens.corr.iter_mut().enumerate() {
+        if !correspondence.valid {
+            continue;
+        }
+        let distance = distances_by_sensor[i];
+        if distance > error_limit {
+            correspondence.valid = false;
+            correspondence.j1 = -1;
+            correspondence.j2 = -1;
+        } else {
+            nvalid += 1;
+            total_error += distance;
+        }
+    }
+
+    OutlierResult {
+        total_error,
+        nvalid,
+    }
+}
+
+/// C clamps both order statistics to `[0, k - 1]` after taking `floor(k*f)`.
+fn percentile_index(count: usize, fraction: f64) -> usize {
+    let upper = (count - 1) as f64;
+    (count as f64 * fraction).floor().clamp(0.0, upper) as usize
+}
+
+/// Euclidean distance from a sensor point to its reference segment.
+///
+/// C: `dist_to_segment_d()` as called by `kill_outliers_trim()` in
+/// `sm/csm/icp/icp_outliers.c`.
+pub(crate) fn correspondence_distance(
+    laser_ref: &LaserData,
+    laser_sens: &LaserData,
+    i: usize,
+) -> Option<f64> {
+    let correspondence = laser_sens.corr.get(i)?;
+    if !correspondence.valid {
+        return None;
+    }
+    let j1 = usize::try_from(correspondence.j1).ok()?;
+    let j2 = usize::try_from(correspondence.j2).ok()?;
+    Some(distance_to_segment(
+        laser_ref.points.get(j1)?.p,
+        laser_ref.points.get(j2)?.p,
+        laser_sens.points_w.get(i)?.p,
+    ))
+}
+
 /// C: `sm/csm/icp/icp_corr_dumb.c:compatible()`
 fn compatible(
     params: &Params,
@@ -405,7 +543,9 @@ fn correspondence_keys(laser_sens: &LaserData) -> Vec<Option<(i32, i32)>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::laser_data::Correspondence;
     use crate::math::corr_hash;
+    use crate::params::OutlierParams;
 
     fn smooth_scan(valid: impl Fn(usize) -> bool) -> LaserData {
         let mut scan = LaserData::new(360, -1.5, 1.5);
@@ -485,5 +625,94 @@ mod tests {
             smooth_scan(|i| i % 37 != 0),
             [0.04, -0.03, 0.008],
         );
+    }
+
+    fn outlier_fixture() -> (LaserData, LaserData) {
+        let mut laser_ref = LaserData::new(12, -1.0, 1.0);
+        let mut laser_sens = LaserData::new(12, -1.0, 1.0);
+        for i in 0..12 {
+            laser_ref.points[i].p = [0.0, -1.0 + i as f64 * 0.25];
+            laser_sens.points_w[i].p = [0.1, 0.0];
+        }
+        for i in 0..5 {
+            laser_sens.corr[i] = Correspondence {
+                valid: true,
+                j1: i as i32,
+                j2: (i + 1) as i32,
+                corr_type: CorrespondenceType::PointToLine,
+                dist2_j1: 1.0,
+            };
+        }
+        (laser_ref, laser_sens)
+    }
+
+    fn configure_segment_correspondences(laser_ref: &mut LaserData, laser_sens: &mut LaserData) {
+        for i in 0..5 {
+            laser_ref.points[2 * i].p = [0.0, -1.0];
+            laser_ref.points[2 * i + 1].p = [0.0, 1.0];
+            laser_sens.corr[i].j1 = (2 * i) as i32;
+            laser_sens.corr[i].j2 = (2 * i + 1) as i32;
+        }
+    }
+
+    #[test]
+    fn duplicate_rejection_keeps_nearest_match_with_c_threshold() {
+        let (laser_ref, mut laser_sens) = outlier_fixture();
+        laser_sens.corr[0].j1 = 2;
+        laser_sens.corr[0].dist2_j1 = 1.0;
+        laser_sens.corr[1].j1 = 2;
+        laser_sens.corr[1].dist2_j1 = 10.0;
+
+        kill_outliers_double(&laser_ref, &mut laser_sens);
+
+        assert!(laser_sens.corr[0].valid);
+        assert!(!laser_sens.corr[1].valid);
+    }
+
+    #[test]
+    fn percentile_trim_uses_floor_index_and_sums_survivor_distances() {
+        let (mut laser_ref, mut laser_sens) = outlier_fixture();
+        configure_segment_correspondences(&mut laser_ref, &mut laser_sens);
+        for i in 0..5 {
+            laser_sens.points_w[i].p = [0.05 + 0.05 * i as f64, 0.0];
+        }
+        let params = OutlierParams {
+            max_perc: 0.4,
+            adaptive_order: 1.0,
+            ..OutlierParams::default()
+        };
+
+        let trimmed = kill_outliers_trim(&params, &laser_ref, &mut laser_sens);
+
+        assert_eq!(trimmed.nvalid, 3);
+        assert!(
+            (trimmed.total_error - 0.3).abs() < 1e-12,
+            "total error was {}",
+            trimmed.total_error
+        );
+        assert!(laser_sens.corr[..3].iter().all(|corr| corr.valid));
+        assert!(laser_sens.corr[3..5].iter().all(|corr| !corr.valid));
+    }
+
+    #[test]
+    fn adaptive_trim_uses_configured_order_and_multiplier() {
+        let (mut laser_ref, mut laser_sens) = outlier_fixture();
+        configure_segment_correspondences(&mut laser_ref, &mut laser_sens);
+        for i in 0..5 {
+            laser_sens.points_w[i].p = [0.1 + 0.01 * i as f64, 0.0];
+        }
+        laser_sens.points_w[4].p = [1.0, 0.0];
+        let params = OutlierParams {
+            max_perc: 1.0,
+            adaptive_order: 0.6,
+            adaptive_mult: 1.1,
+            ..OutlierParams::default()
+        };
+
+        let trimmed = kill_outliers_trim(&params, &laser_ref, &mut laser_sens);
+
+        assert_eq!(trimmed.nvalid, 4, "total error was {}", trimmed.total_error);
+        assert!((trimmed.total_error - 0.46).abs() < 1e-12);
+        assert!(laser_sens.corr[4].j1 == -1 && laser_sens.corr[4].j2 == -1);
     }
 }

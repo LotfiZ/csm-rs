@@ -51,6 +51,14 @@ static void build_scan(LDP ld) {
     }
 }
 
+static void build_trim_case(LDP *ref, LDP *sens) {
+    *ref = ld_alloc_new(NRAYS);
+    *sens = ld_alloc_new(NRAYS);
+    build_scan(*ref);
+    build_scan(*sens);
+    for (int i = 20; i < 40; i++) (*sens)->readings[i] += 1.0;
+}
+
 static void print_scan_json(const char *name, LDP ld) {
     int i;
     printf("    \"%s\": {\n", name);
@@ -101,7 +109,9 @@ static void print_params_json(struct sm_params *p) {
 }
 
 static void run_case(const char *name, const double first_guess[3],
-                     LDP ref, LDP sens) {
+                     LDP ref, LDP sens, int max_iterations, int restart,
+                     double outliers_max_perc, double outliers_adaptive_order,
+                     double outliers_adaptive_mult, int outliers_remove_doubles) {
     struct sm_params params;
     struct sm_result result;
     struct option *ops = options_allocate(32);
@@ -113,6 +123,12 @@ static void run_case(const char *name, const double first_guess[3],
     params.first_guess[0] = first_guess[0];
     params.first_guess[1] = first_guess[1];
     params.first_guess[2] = first_guess[2];
+    params.max_iterations = max_iterations;
+    params.restart = restart;
+    params.outliers_maxPerc = outliers_max_perc;
+    params.outliers_adaptive_order = outliers_adaptive_order;
+    params.outliers_adaptive_mult = outliers_adaptive_mult;
+    params.outliers_remove_doubles = outliers_remove_doubles;
 
     sm_icp(&params, &result);
 
@@ -136,6 +152,7 @@ static void run_case(const char *name, const double first_guess[3],
 
 int main(void) {
     static const double zero_guess[3] = {0.0, 0.0, 0.0};
+    static const double translated_guess[3] = {1.0, 0.0, 0.0};
 
     LDP ref  = ld_alloc_new(NRAYS);
     LDP sens = ld_alloc_new(NRAYS);
@@ -145,7 +162,30 @@ int main(void) {
     printf("{\n");
     printf("  \"schema\": \"csm-rs-fixture/v1\",\n");
     printf("  \"cases\": [\n");
-    run_case("identity", zero_guess, ref, sens);
+    run_case("identity", zero_guess, ref, sens, 1000, 1, 0.95, 0.7, 2.0, 1);
+
+    /* Percentile-only trim: the twenty perturbed rays have a positive
+     * point-to-line error, while the adaptive limit is disabled at order 1. */
+    build_trim_case(&ref, &sens);
+    printf(",\n");
+    run_case("percentile_trim", zero_guess, ref, sens, 1, 0, 0.5, 1.0, 2.0, 0);
+
+    /* Adaptive-only trim: maxPerc is disabled at order 1, leaving the
+     * order-0.7, multiplier-2 threshold to reject the same outliers. */
+    build_trim_case(&ref, &sens);
+    printf(",\n");
+    run_case("adaptive_trim", zero_guess, ref, sens, 1, 0, 1.0, 0.7, 2.0, 0);
+
+    /* A translated first guess makes several sensor rays choose the same
+     * reference ray. The fixed three-times-distance duplicate rule removes
+     * the farther copies before the trim pass. */
+    ref = ld_alloc_new(NRAYS);
+    sens = ld_alloc_new(NRAYS);
+    build_scan(ref);
+    build_scan(sens);
+    printf(",\n");
+    run_case("duplicate_correspondence", translated_guess, ref, sens,
+        1, 0, 0.95, 0.7, 2.0, 1);
     printf("  ]\n");
     printf("}\n");
     return 0;

@@ -14,7 +14,7 @@
 //! if copyleft ever blocks a use case (grilling Q13).
 
 use crate::laser_data::{CorrespondenceType, LaserData};
-use crate::math::{distance_to_segment, projection_on_segment, Mat2, Mat4};
+use crate::math::{projection_on_segment, Mat2, Mat4};
 use crate::params::Params;
 
 /// One weighted point correspondence in the form consumed by GPC.
@@ -246,28 +246,6 @@ pub(crate) fn gpc_total_error(correspondences: &[GpcCorrespondence], pose: [f64;
         .filter(|correspondence| correspondence.valid)
         .map(|correspondence| gpc_error(correspondence, pose))
         .sum()
-}
-
-/// Euclidean error used by CSM's outlier/iteration bookkeeping.
-///
-/// C: `dist_to_segment_d()` as called by `kill_outliers_trim()` in
-/// `sm/csm/icp/icp_outliers.c`
-pub(crate) fn correspondence_distance(
-    laser_ref: &LaserData,
-    laser_sens: &LaserData,
-    i: usize,
-) -> Option<f64> {
-    let correspondence = laser_sens.corr.get(i)?;
-    if !correspondence.valid {
-        return None;
-    }
-    let j1 = usize::try_from(correspondence.j1).ok()?;
-    let j2 = usize::try_from(correspondence.j2).ok()?;
-    Some(distance_to_segment(
-        laser_ref.points.get(j1)?.p,
-        laser_ref.points.get(j2)?.p,
-        laser_sens.points_w.get(i)?.p,
-    ))
 }
 
 fn mat2_det(matrix: &Mat2) -> f64 {
