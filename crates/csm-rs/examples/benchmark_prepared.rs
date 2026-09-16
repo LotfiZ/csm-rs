@@ -34,11 +34,18 @@ fn main() {
             successful += usize::from(outcome.valid);
             black_box(outcome);
         }
+        samples.sort_by(f64::total_cmp);
+        let percentile = |p: f64| -> f64 {
+            let index = ((samples.len() - 1) as f64 * p).round() as usize;
+            samples[index]
+        };
         println!(
-            "mode={label},rays=720,repetitions=30,workspace_bytes={estimated_workspace_bytes},total_ms={:.3},mean_ms={:.3},min_ms={:.3},max_ms={:.3},successful_matches={successful}",
+            "mode={label},rays=720,repetitions=30,workspace_bytes={estimated_workspace_bytes},total_ms={:.3},mean_ms={:.3},min_ms={:.3},p95_ms={:.3},p99_ms={:.3},max_ms={:.3},successful_matches={successful}",
             start.elapsed().as_secs_f64() * 1e3,
             samples.iter().sum::<f64>() / samples.len() as f64,
             samples.iter().copied().fold(f64::INFINITY, f64::min),
+            percentile(0.95),
+            percentile(0.99),
             samples.iter().copied().fold(0.0, f64::max),
         );
     }
