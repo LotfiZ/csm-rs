@@ -91,6 +91,10 @@ cargo run --release -p csm-rs --example benchmark_baseline
 cargo run --release -p csm-rs --example benchmark_prepared
 ```
 
+The prepared benchmark reports both full covariance mode and the pose-only
+mode, allowing deployments to measure the cost of uncertainty outputs on their
+own hardware.
+
 The idiomatic API borrows application buffers and returns a typed outcome:
 
 ```rust
