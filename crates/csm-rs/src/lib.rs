@@ -29,7 +29,7 @@ pub mod params;
 pub mod result;
 pub mod solver;
 
-pub use laser_data::LaserData;
+pub use laser_data::{LaserData, LaserDataError};
 pub use params::Params;
 pub use result::SmResult;
 
@@ -37,8 +37,9 @@ pub use result::SmResult;
 ///
 /// The scans are mutable because CSM fills their cartesian, world-coordinate,
 /// and correspondence fields in place. A failed match is reported through
-/// `result.valid`; malformed scan data is rejected there as an invalid result,
-/// matching the C entry point's failure model.
+/// `result.valid`; malformed scan data is returned as [`LaserDataError`].
+/// This keeps malformed input separate from a valid scan pair that simply does
+/// not converge.
 ///
 /// C: `sm/csm/icp/icp.c:sm_icp()`
 pub fn sm_icp(
@@ -46,6 +47,6 @@ pub fn sm_icp(
     laser_ref: &mut LaserData,
     laser_sens: &mut LaserData,
     result: &mut SmResult,
-) {
+) -> Result<(), LaserDataError> {
     icp::sm_icp(params, laser_ref, laser_sens, result)
 }

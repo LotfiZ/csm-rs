@@ -174,7 +174,8 @@ fn run_case(params: &Params, case: &Case) -> (SmResult, LaserData) {
     let mut laser_ref = build_scan(&case.laser_ref);
     let mut laser_sens = build_scan(&case.laser_sens);
     let mut result = SmResult::default();
-    sm_icp(params, &mut laser_ref, &mut laser_sens, &mut result);
+    sm_icp(params, &mut laser_ref, &mut laser_sens, &mut result)
+        .expect("golden fixture scans must pass input validation");
     (result, laser_sens)
 }
 
@@ -312,13 +313,6 @@ fn fixture_cases_match_c_reference_and_each_strategy() {
             _ => panic!("case {} has incomplete covariance expectation", case.name),
         }
 
-        // C's tricks search intentionally omits the optional alpha test. Keep
-        // the strategy-equivalence assertion for the common path and let an
-        // alpha-enabled fixture validate the configured C path directly.
-        if params.correspondence.do_alpha_test {
-            continue;
-        }
-
         // The upstream stallo2 regression log is intentionally retained as a
         // smart-path corpus case even though C's smart and naive searches
         // diverge on its invalid sectors. Its configured path and first hash
@@ -410,13 +404,15 @@ fn fixture_cases_match_c_reference_and_each_strategy() {
             &mut first_tricks_ref,
             &mut first_tricks_sens,
             &mut first_tricks_result,
-        );
+        )
+        .expect("golden fixture scans must pass input validation");
         sm_icp(
             &first_naive_params,
             &mut first_naive_ref,
             &mut first_naive_sens,
             &mut first_naive_result,
-        );
+        )
+        .expect("golden fixture scans must pass input validation");
         let first_tricks_keys: Vec<_> = first_tricks_sens
             .corr
             .iter()

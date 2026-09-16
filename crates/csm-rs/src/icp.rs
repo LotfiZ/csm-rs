@@ -12,7 +12,7 @@
 
 use crate::correspondence::{find_correspondences, kill_outliers_double, kill_outliers_trim};
 use crate::covariance::compute_covariance_exact;
-use crate::laser_data::LaserData;
+use crate::laser_data::{LaserData, LaserDataError};
 use crate::math::{corr_hash, ominus, pose_diff};
 use crate::params::DistanceMetric;
 use crate::params::Params;
@@ -27,13 +27,12 @@ pub(crate) fn sm_icp(
     laser_ref: &mut LaserData,
     laser_sens: &mut LaserData,
     result: &mut SmResult,
-) {
+) -> Result<(), LaserDataError> {
     *result = SmResult::default();
 
     // C: `ld_valid_fields()` is checked before any input mutation.
-    if laser_ref.validate().is_err() || laser_sens.validate().is_err() {
-        return;
-    }
+    laser_ref.validate()?;
+    laser_sens.validate()?;
 
     // C: `ld_invalid_if_outside()` in `icp.c`.
     laser_ref.invalid_if_outside(params.reading_bounds.min, params.reading_bounds.max);
@@ -93,6 +92,8 @@ pub(crate) fn sm_icp(
             result.dx_dy2 = Some(covariance.dx_dy2);
         }
     }
+
+    Ok(())
 }
 
 #[derive(Clone, Copy, Debug)]
