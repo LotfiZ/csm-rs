@@ -1,14 +1,29 @@
-[workspace]
-resolver = "2"
-members = ["crates/csm-rs"]
-# Parked (grilling Q12): crates/csm-horus-node joins once the library validates.
-
-[workspace.package]
+[package]
+name = "csm-rs"
+version = "0.1.0"
 edition = "2021"
-# The current crate includes the GPL-2.0-or-later gpc-derived solver.
-# Revisit this metadata only after a clean-room solver replaces it.
+rust-version = "1.70"
 license = "GPL-2.0-or-later"
 repository = "https://github.com/LotfiZ/csm-rs"
+homepage = "https://github.com/LotfiZ/csm-rs"
+keywords = ["lidar", "scan-matching", "icp", "robotics", "slam"]
+categories = ["science::robotics", "algorithms"]
+description = "Rust port of the Canonical Scan Matcher (Censi 2007): point-to-line ICP with closed-form covariance"
+exclude = ["tests/fixtures/**", "fixture-generator/**"]
+
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
+
+[dependencies]
+
+[dev-dependencies]
+serde_json = "1"
+serde = { version = "1", features = ["derive"] }
+
+[workspace]
+resolver = "2"
+members = ["."]
 
 [profile.release]
 lto = true
