@@ -123,6 +123,16 @@ Prepared scans can be refreshed in place with `update` or
 outcome, which is suitable for metrics, logging, or a UI adapter without a
 runtime logging dependency.
 
+For a fixed-shape stream, `Matcher::prepare` retains the scan and ICP
+workspace across frames:
+
+```text
+let mut workspace = Matcher::pose_only(Params::default()).prepare(reference, sensor)?;
+workspace.update_sensor(&next_readings, &next_valid)?;
+let estimate = workspace.match_once()?;
+# Ok::<(), csm_rs::LaserDataError>(())
+```
+
 When covariance is not needed, `Matcher::pose_only(Params::default())`
 disables the optional covariance and derivative calculations for a smaller
 embedded runtime path.
