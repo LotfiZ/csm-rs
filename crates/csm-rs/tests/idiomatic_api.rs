@@ -114,7 +114,7 @@ fn prepared_cartesian_scan_updates() {
 fn cartesian_validation_reports_offending_ray() {
     let mut points = vec![[1.0, 0.0]; 21];
     points[7][0] = f64::NAN;
-    let err = CartesianScan::new(&points, &vec![true; 21]).unwrap_err();
+    let err = CartesianScan::new(&points, &[true; 21]).unwrap_err();
     assert_eq!(err, csm_rs::LaserDataError::BadValidRay(7));
 }
 
