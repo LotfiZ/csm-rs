@@ -88,6 +88,9 @@ impl PreparedPolarScan {
     pub fn is_empty(&self) -> bool {
         self.data.nrays == 0
     }
+    pub fn capacity(&self) -> usize {
+        self.data.theta.capacity()
+    }
     pub fn angles(&self) -> &[f64] {
         &self.data.theta
     }
