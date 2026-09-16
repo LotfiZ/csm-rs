@@ -204,6 +204,22 @@ fn prepared_match_supports_orientation_and_visibility_filters() {
 }
 
 #[test]
+fn prepared_match_supports_weighting_options() {
+    let angles: Vec<f64> = (0..41).map(|i| -1.0 + i as f64 * 0.05).collect();
+    let readings = vec![8.0; angles.len()];
+    let valid = vec![true; angles.len()];
+    let reference =
+        PreparedPolarScan::from_polar(angles.clone(), readings.clone(), valid.clone()).unwrap();
+    let sensor = PreparedPolarScan::from_polar(angles, readings, valid).unwrap();
+    let mut params = Params::default();
+    params.weights.ml = true;
+    params.weights.sigma = true;
+    let mut workspace = Matcher::new(params).prepare(reference, sensor).unwrap();
+    let outcome = workspace.match_once().unwrap();
+    assert!(outcome.iterations >= 0);
+}
+
+#[test]
 fn cartesian_explicit_angles_are_validated_and_preserved() {
     let points = vec![[8.0, 0.0]; 21];
     let valid = vec![true; 21];
