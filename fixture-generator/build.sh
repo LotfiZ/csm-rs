@@ -4,7 +4,7 @@
 # CSM's vendored json-c is compiled with a minimal generated config.h.
 #
 # Usage: ./build.sh <path-to-csm-source> [output.json]
-# Example: ./build.sh ~/workspace/csm-src ../crates/csm-rs/tests/fixtures/identity.json
+# Example: ./build.sh ~/workspace/csm-src ../tests/fixtures/identity.json
 set -euo pipefail
 
 CSM_SRC="${1:?usage: build.sh <csm-source-dir> [output.json]}"

@@ -18,7 +18,7 @@ docs for the C cross-references and per-decision rationale.
 The port is validated *golden-master* against the original C library:
 a throwaway C generator (in `fixture-generator/`, never built by cargo) links
 the reference implementation and emits JSON fixtures (scan pairs + params +
-expected results) checked into `crates/csm-rs/tests/fixtures/`. The 16-case
+expected results) checked into `tests/fixtures/`. The 16-case
 corpus covers the synthetic baseline, covariance, trimming, duplicate,
 restart, oscillation, feature, and weighting paths, plus the upstream
 `misc/tests` logs, a three-point collinear degenerate geometry case, and an
@@ -82,7 +82,7 @@ cargo run -p csm-rs --example scan_matching
 
 The example simulates a robot scanning a square room. It needs no input files,
 extra dependencies, or C installation. Change `FIRST_SENSOR_POSE` in
-`crates/csm-rs/examples/scan_matching.rs` to try another small movement.
+`examples/scan_matching.rs` to try another small movement.
 
 Performance baselines are dependency-free and reproducible in release mode:
 
@@ -182,15 +182,18 @@ Regenerate the corpus with the C reference source checked out at
 
 ```sh
 ./fixture-generator/build.sh /path/to/csm-source \
-  crates/csm-rs/tests/fixtures/identity.json
+  tests/fixtures/identity.json
 ```
 
 ## Workspace layout
 
-- `crates/csm-rs` — the pure library (no robotics-framework dependencies)
-- `fixture-generator/` — throwaway C tool producing the JSON fixtures
-- *(parked)* `crates/csm-horus-node` — [HORUS](https://horusrobotics.dev) node
-  wrapper, to be designed once the library validates
+- `src/` — the core library (no robotics-framework dependencies)
+- `tests/` — integration tests and C reference fixtures
+- `examples/` — runnable examples and measurement programs
+- `fixture-generator/` — C tool producing the reference fixtures
+- `docs/contributing.md` — contributor commands and numerical baseline
+
+The separate local demo package will be introduced as part of the remaster.
 
 ## License
 
