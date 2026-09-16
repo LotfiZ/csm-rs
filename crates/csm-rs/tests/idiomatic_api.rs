@@ -77,6 +77,25 @@ fn prepared_scan_updates_without_changing_shape() {
 }
 
 #[test]
+fn prepared_cartesian_constructor_matches() {
+    let points: Vec<[f64; 2]> = (0..21)
+        .map(|i| {
+            let a = -1.0 + i as f64 * 0.1;
+            [8.0 * a.cos(), 8.0 * a.sin()]
+        })
+        .collect();
+    let valid = vec![true; points.len()];
+    let mut reference = PreparedPolarScan::from_cartesian(&points, &valid).unwrap();
+    let mut sensor = PreparedPolarScan::from_cartesian(&points, &valid).unwrap();
+    assert!(
+        Matcher::default()
+            .match_prepared(&mut reference, &mut sensor)
+            .unwrap()
+            .valid
+    );
+}
+
+#[test]
 fn borrowed_polar_rejects_mismatched_lengths() {
     let err = PolarScan::new(&[0.0; 10], &[1.0; 9], &[true; 10]).unwrap_err();
     assert!(matches!(

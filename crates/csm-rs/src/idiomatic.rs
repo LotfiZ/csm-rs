@@ -74,6 +74,13 @@ impl PreparedPolarScan {
         })
     }
 
+    pub fn from_cartesian(points: &[[f64; 2]], valid: &[bool]) -> Result<Self, LaserDataError> {
+        let scan = CartesianScan::new(points, valid)?;
+        let angles = scan.points.iter().map(|p| p[1].atan2(p[0])).collect();
+        let readings = scan.points.iter().map(|p| p[0].hypot(p[1])).collect();
+        Self::from_polar(angles, readings, valid.to_vec())
+    }
+
     pub fn len(&self) -> usize {
         self.data.nrays
     }
