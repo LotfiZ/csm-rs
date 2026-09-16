@@ -255,6 +255,7 @@ pub struct Matcher {
 }
 
 impl Matcher {
+    #[must_use]
     pub fn new(params: Params) -> Self {
         Self { params }
     }
