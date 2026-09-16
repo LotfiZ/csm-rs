@@ -108,6 +108,11 @@ impl PreparedMatcher {
     pub fn sensor(&self) -> &PreparedPolarScan {
         &self.sensor
     }
+
+    /// Return `(reference_capacity, sensor_capacity)` in rays.
+    pub fn capacities(&self) -> (usize, usize) {
+        (self.reference.capacity(), self.sensor.capacity())
+    }
     pub fn sensor_mut(&mut self) -> &mut PreparedPolarScan {
         &mut self.sensor
     }
