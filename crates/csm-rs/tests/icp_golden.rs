@@ -313,6 +313,14 @@ fn fixture_cases_match_c_reference_and_each_strategy() {
             _ => panic!("case {} has incomplete covariance expectation", case.name),
         }
 
+        // C's tricks search intentionally omits the optional alpha test. Keep
+        // that reference behavior and validate alpha-enabled cases through
+        // their configured C path; strategy equivalence is asserted below
+        // when both C strategies share the same semantics.
+        if params.correspondence.do_alpha_test {
+            continue;
+        }
+
         // The upstream stallo2 regression log is intentionally retained as a
         // smart-path corpus case even though C's smart and naive searches
         // diverge on its invalid sectors. Its configured path and first hash

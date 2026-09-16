@@ -14,10 +14,9 @@
 //! sectors. The golden test records that divergence while checking the
 //! configured smart path and its first-iteration hash against C.
 //!
-//! The Rust strategies apply the optional alpha filter consistently. The C
-//! smart routine omits that filter, but normalizing it here keeps the two
-//! selectable Rust strategies equivalent; the alpha-enabled golden cases
-//! remain checked against the C output.
+//! The upstream tricks routine does not call `compatible()` for its optional
+//! alpha filter. That C asymmetry is preserved here; alpha-enabled fixtures
+//! therefore use the naive strategy at the public golden seam.
 
 use crate::laser_data::{CorrespondenceType, LaserData};
 use crate::math::{angle_diff, corr_hash, distance_squared, distance_to_segment, norm};
@@ -72,9 +71,8 @@ pub(crate) fn find_correspondences(
 /// Find the nearest reference ray with the jump-table search.
 ///
 /// C: `sm/csm/icp/icp_corr_tricks.c:find_correspondences_tricks()`
-/// The C routine does not apply `compatible()` in this function. The Rust API
-/// applies the same optional alpha filter as the naive path so both selectable
-/// strategies have the documented correspondence contract.
+/// The C routine intentionally does not apply `compatible()`; preserve that
+/// behavior even when the optional alpha filter is enabled.
 fn find_correspondences_tricks(params: &Params, laser_ref: &LaserData, laser_sens: &mut LaserData) {
     let c1 = laser_ref.nrays as f64 / (laser_ref.max_theta - laser_ref.min_theta);
     let max_correspondence_dist2 = params.correspondence.max_dist * params.correspondence.max_dist;
@@ -133,10 +131,6 @@ fn find_correspondences_tricks(params: &Params, laser_ref: &LaserData, laser_sen
                 }
 
                 last_dist_up = distance_squared(p_i_w, laser_ref.points[up as usize].p);
-                if !compatible(params, i, up as usize, laser_ref, laser_sens) {
-                    up += 1;
-                    continue;
-                }
                 if last_dist_up < best_dist || j1 == -1 {
                     j1 = up;
                     best_dist = last_dist_up;
@@ -176,10 +170,6 @@ fn find_correspondences_tricks(params: &Params, laser_ref: &LaserData, laser_sen
                 }
 
                 last_dist_down = distance_squared(p_i_w, laser_ref.points[down as usize].p);
-                if !compatible(params, i, down as usize, laser_ref, laser_sens) {
-                    down -= 1;
-                    continue;
-                }
                 if last_dist_down < best_dist || j1 == -1 {
                     j1 = down;
                     best_dist = last_dist_down;
