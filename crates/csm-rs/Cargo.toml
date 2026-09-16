@@ -10,6 +10,10 @@ keywords = ["lidar", "scan-matching", "icp", "robotics", "slam"]
 categories = ["science::robotics", "algorithms"]
 description = "Rust port of the Canonical Scan Matcher (Censi 2007): point-to-line ICP with closed-form covariance"
 
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
+
 [dependencies]
 
 [dev-dependencies]
