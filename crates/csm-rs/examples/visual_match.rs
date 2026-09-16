@@ -14,6 +14,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .covariance
         .map(|matrix| format!("{:?}", matrix.data))
         .unwrap_or_else(|| "unavailable".to_owned());
+    let derivatives = usize::from(outcome.dx_dy_reference.is_some())
+        + usize::from(outcome.dx_dy_sensor.is_some());
 
     let points: Vec<String> = angles
         .iter()
@@ -29,7 +31,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .replace("__X__", &format!("{:.3}", outcome.pose[0]))
         .replace("__Y__", &format!("{:.3}", outcome.pose[1]))
         .replace("__THETA__", &format!("{:.3}", outcome.pose[2]))
-        .replace("</main>", &format!("<p>covariance: {covariance}</p></main>"));
+        .replace("</main>", &format!("<p>covariance: {covariance}<br>derivative matrices: {derivatives}/2</p></main>"));
     println!("{html}");
     Ok(())
 }
