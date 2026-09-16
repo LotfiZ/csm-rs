@@ -195,7 +195,15 @@ impl PreparedMatcher {
             &mut result,
             &mut self.scratch,
         )?;
-        Ok(result.into())
+        let mut outcome: MatchOutcome = result.into();
+        outcome.covariance_status = if !self.matcher.params.do_compute_covariance {
+            CovarianceStatus::Disabled
+        } else if outcome.has_uncertainty() {
+            CovarianceStatus::Computed
+        } else {
+            CovarianceStatus::Failed
+        };
+        Ok(outcome)
     }
 
     /// Match into caller-owned result storage for allocation-free result reuse.
@@ -394,6 +402,15 @@ pub struct MatchOutcome {
     pub covariance: Option<Mat3>,
     pub dx_dy_reference: Option<Matrix>,
     pub dx_dy_sensor: Option<Matrix>,
+    pub covariance_status: CovarianceStatus,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum CovarianceStatus {
+    #[default]
+    Disabled,
+    Computed,
+    Failed,
 }
 
 impl MatchOutcome {
@@ -440,6 +457,7 @@ impl From<SmResult> for MatchOutcome {
             covariance: result.cov_x,
             dx_dy_reference: result.dx_dy1,
             dx_dy_sensor: result.dx_dy2,
+            covariance_status: CovarianceStatus::Disabled,
         }
     }
 }

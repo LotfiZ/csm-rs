@@ -1,6 +1,6 @@
 use csm_rs::{
-    CartesianScan, MatchOutcome, MatchStatus, Matcher, Params, PolarScan, PreparedMatcher,
-    PreparedPolarScan, SmResult,
+    CartesianScan, CovarianceStatus, MatchOutcome, MatchStatus, Matcher, Params, PolarScan,
+    PreparedMatcher, PreparedPolarScan, SmResult,
 };
 
 #[test]
@@ -156,6 +156,7 @@ fn pose_only_matcher_omits_optional_covariance() {
         .match_polar(reference, sensor)
         .unwrap();
     assert!(outcome.valid && outcome.covariance.is_none());
+    assert_eq!(outcome.covariance_status, CovarianceStatus::Disabled);
 }
 
 #[test]
