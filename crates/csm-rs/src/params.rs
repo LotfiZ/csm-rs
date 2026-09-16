@@ -308,6 +308,12 @@ impl Params {
         }
         Ok(())
     }
+
+    /// Validate and return the configuration for fluent construction.
+    pub fn validated(self) -> Result<Self, ParamsError> {
+        self.validate()?;
+        Ok(self)
+    }
 }
 
 #[cfg(test)]
