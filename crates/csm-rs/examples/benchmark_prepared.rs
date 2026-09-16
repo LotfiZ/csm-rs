@@ -13,6 +13,8 @@ fn main() {
     let mut reference =
         PreparedPolarScan::from_polar(angles.clone(), readings.clone(), valid.clone()).unwrap();
     let mut sensor = PreparedPolarScan::from_polar(angles, readings, valid).unwrap();
+    let estimated_workspace_bytes = (reference.capacity() + sensor.capacity())
+        * (std::mem::size_of::<f64>() + std::mem::size_of::<bool>());
     for (label, matcher) in [
         ("full", Matcher::new(Params::default())),
         ("pose_only", Matcher::pose_only(Params::default())),
@@ -33,7 +35,7 @@ fn main() {
             black_box(outcome);
         }
         println!(
-            "mode={label},rays=720,repetitions=30,total_ms={:.3},mean_ms={:.3},min_ms={:.3},max_ms={:.3},successful_matches={successful}",
+            "mode={label},rays=720,repetitions=30,workspace_bytes={estimated_workspace_bytes},total_ms={:.3},mean_ms={:.3},min_ms={:.3},max_ms={:.3},successful_matches={successful}",
             start.elapsed().as_secs_f64() * 1e3,
             samples.iter().sum::<f64>() / samples.len() as f64,
             samples.iter().copied().fold(f64::INFINITY, f64::min),
