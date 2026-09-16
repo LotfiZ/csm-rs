@@ -256,4 +256,18 @@ impl Matcher {
         )?;
         Ok(result.into())
     }
+
+    /// Reuse a caller-owned legacy result buffer for a prepared match.
+    ///
+    /// This is useful in fixed-rate loops where the result storage is kept
+    /// alongside the scan workspace.
+    pub fn match_prepared_into(
+        &self,
+        reference: &mut PreparedPolarScan,
+        sensor: &mut PreparedPolarScan,
+        result: &mut SmResult,
+    ) -> Result<(), LaserDataError> {
+        *result = SmResult::default();
+        icp::sm_icp(&self.params, &mut reference.data, &mut sensor.data, result)
+    }
 }
