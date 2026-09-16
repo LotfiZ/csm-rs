@@ -149,6 +149,14 @@ impl IcpScratch {
             trace_enabled: false,
         }
     }
+
+    pub(crate) fn memory_bytes(&self) -> usize {
+        self.hashes.capacity() * std::mem::size_of::<u32>()
+            + self.nearest_distances.capacity() * std::mem::size_of::<f64>()
+            + self.distances_by_sensor.capacity() * std::mem::size_of::<f64>()
+            + self.distances.capacity() * std::mem::size_of::<f64>()
+            + self.correspondences.capacity() * std::mem::size_of::<GpcCorrespondence>()
+    }
 }
 
 /// Run ICP once, then try CSM's six local perturbations when the mean error is

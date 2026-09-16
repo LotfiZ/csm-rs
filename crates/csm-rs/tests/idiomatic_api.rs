@@ -359,6 +359,7 @@ fn prepared_matcher_reuses_owned_scans() {
     assert!(workspace.match_once().unwrap().valid);
     assert_eq!(workspace.reference().len(), 21);
     assert_eq!(workspace.capacities(), (21, 21));
+    assert!(workspace.workspace_bytes() > 0);
     workspace.update_sensor(&[8.0; 21], &[true; 21]).unwrap();
     let points: Vec<[f64; 2]> = (0..21)
         .map(|i| {

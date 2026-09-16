@@ -146,6 +146,11 @@ impl PreparedMatcher {
     pub fn capacities(&self) -> (usize, usize) {
         (self.reference.capacity(), self.sensor.capacity())
     }
+
+    /// Bytes currently reserved by the reusable ICP workspace.
+    pub fn workspace_bytes(&self) -> usize {
+        self.scratch.memory_bytes()
+    }
     pub fn sensor_mut(&mut self) -> &mut PreparedPolarScan {
         &mut self.sensor
     }
