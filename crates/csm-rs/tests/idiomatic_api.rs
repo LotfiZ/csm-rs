@@ -188,6 +188,23 @@ fn uncertainty_helper_requires_all_diagnostics() {
 }
 
 #[test]
+fn cartesian_explicit_angles_are_validated_and_preserved() {
+    let points = vec![[8.0, 0.0]; 21];
+    let valid = vec![true; 21];
+    let angles: Vec<f64> = (0..21).map(|i| i as f64 * 0.03).collect();
+    let scan = CartesianScan::with_angles(&points, &angles, &valid).unwrap();
+    assert_eq!(scan.angles(), Some(angles.as_slice()));
+    let err = CartesianScan::with_angles(&points, &angles[..20], &valid).unwrap_err();
+    assert!(matches!(
+        err,
+        csm_rs::LaserDataError::InconsistentLengths {
+            field: "angles",
+            ..
+        }
+    ));
+}
+
+#[test]
 fn cartesian_match_preserves_points() {
     let points: Vec<[f64; 2]> = (0..21)
         .map(|i| {
