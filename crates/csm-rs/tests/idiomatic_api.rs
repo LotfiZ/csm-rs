@@ -1,4 +1,6 @@
-use csm_rs::{CartesianScan, MatchOutcome, Matcher, Params, PolarScan, PreparedPolarScan};
+use csm_rs::{
+    CartesianScan, MatchOutcome, MatchStatus, Matcher, Params, PolarScan, PreparedPolarScan,
+};
 
 #[test]
 fn borrowed_polar_match_preserves_inputs() {
@@ -16,6 +18,8 @@ fn borrowed_polar_match_preserves_inputs() {
         .unwrap();
 
     assert!(outcome.valid);
+    assert_eq!(outcome.status, MatchStatus::Converged);
+    assert!(outcome.converged());
     assert!(outcome.pose.iter().all(|v| v.abs() < 1e-6));
     assert_eq!(angles, angles_before);
     assert_eq!(readings, readings_before);

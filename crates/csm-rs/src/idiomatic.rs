@@ -142,6 +142,7 @@ impl<'a> PolarScan<'a> {
 /// inspect [`Self::valid`] to distinguish that case from input errors.
 #[derive(Clone, Debug, Default)]
 pub struct MatchOutcome {
+    pub status: MatchStatus,
     pub valid: bool,
     pub pose: [f64; 3],
     pub iterations: i32,
@@ -152,9 +153,27 @@ pub struct MatchOutcome {
     pub dx_dy_sensor: Option<Matrix>,
 }
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum MatchStatus {
+    #[default]
+    Failed,
+    Converged,
+}
+
+impl MatchOutcome {
+    pub fn converged(&self) -> bool {
+        self.status == MatchStatus::Converged
+    }
+}
+
 impl From<SmResult> for MatchOutcome {
     fn from(result: SmResult) -> Self {
         Self {
+            status: if result.valid {
+                MatchStatus::Converged
+            } else {
+                MatchStatus::Failed
+            },
             valid: result.valid,
             pose: result.x,
             iterations: result.iterations,
