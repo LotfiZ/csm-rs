@@ -454,7 +454,9 @@ impl LaserData {
             }
         }
 
-        if self.nrays < 10 || self.nrays > 10000 {
+        // The C implementation capped this at 10,000, but Rust callers may
+        // use larger industrial scans; allocation is bounded by the input.
+        if self.nrays < 10 {
             return Err(E::NraysOutOfRange);
         }
         if self.min_theta.is_nan() || self.max_theta.is_nan() {
@@ -515,7 +517,7 @@ pub enum LaserDataError {
         /// Actual vector length.
         actual: usize,
     },
-    /// C: nrays must be in [10, 10000]
+    /// At least 10 rays are required. There is no artificial upper bound.
     NraysOutOfRange,
     /// C: min/max theta must not be NaN
     NanThetaBounds,
@@ -546,7 +548,7 @@ impl std::fmt::Display for LaserDataError {
                 f,
                 "{field} has {actual} entries but nrays requires {expected}"
             ),
-            Self::NraysOutOfRange => write!(f, "invalid number of rays (need 10..=10000)"),
+            Self::NraysOutOfRange => write!(f, "invalid number of rays (need at least 10)"),
             Self::NanThetaBounds => write!(f, "NaN min/max theta"),
             Self::FovOutOfRange => write!(f, "FOV outside [20 deg, 2.01 pi]"),
             Self::ThetaBoundsMismatch => {
