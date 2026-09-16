@@ -96,6 +96,21 @@ fn prepared_cartesian_constructor_matches() {
 }
 
 #[test]
+fn prepared_cartesian_scan_updates() {
+    let points: Vec<[f64; 2]> = (0..21)
+        .map(|i| {
+            let a = -1.0 + i as f64 * 0.1;
+            [8.0 * a.cos(), 8.0 * a.sin()]
+        })
+        .collect();
+    let valid = vec![true; points.len()];
+    let mut scan = PreparedPolarScan::from_cartesian(&points, &valid).unwrap();
+    let updated: Vec<[f64; 2]> = points.iter().map(|p| [p[0] * 0.9, p[1] * 0.9]).collect();
+    scan.update_cartesian(&updated, &valid).unwrap();
+    assert!((scan.readings()[10] - 7.2).abs() < 1e-9);
+}
+
+#[test]
 fn borrowed_polar_rejects_mismatched_lengths() {
     let err = PolarScan::new(&[0.0; 10], &[1.0; 9], &[true; 10]).unwrap_err();
     assert!(matches!(

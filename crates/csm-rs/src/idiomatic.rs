@@ -123,6 +123,27 @@ impl PreparedPolarScan {
         self.data.corr.fill(Default::default());
         self.data.validate()
     }
+
+    /// Refresh an ordered Cartesian frame in place.
+    pub fn update_cartesian(
+        &mut self,
+        points: &[[f64; 2]],
+        valid: &[bool],
+    ) -> Result<(), LaserDataError> {
+        if points.len() != self.data.nrays {
+            return Err(LaserDataError::InconsistentLengths {
+                field: "points",
+                expected: self.data.nrays,
+                actual: points.len(),
+            });
+        }
+        let scan = CartesianScan::new(points, valid)?;
+        let mut readings = vec![0.0; points.len()];
+        for (reading, point) in readings.iter_mut().zip(scan.points) {
+            *reading = point[0].hypot(point[1]);
+        }
+        self.update(&readings, valid)
+    }
 }
 
 impl<'a> PolarScan<'a> {
