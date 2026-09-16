@@ -121,6 +121,15 @@ impl PreparedMatcher {
         self.sensor.update(readings, valid)
     }
 
+    /// Update an ordered Cartesian sensor frame in place.
+    pub fn update_sensor_cartesian(
+        &mut self,
+        points: &[[f64; 2]],
+        valid: &[bool],
+    ) -> Result<(), LaserDataError> {
+        self.sensor.update_cartesian(points, valid)
+    }
+
     /// Update the reference frame while preserving its allocation.
     pub fn update_reference(
         &mut self,
