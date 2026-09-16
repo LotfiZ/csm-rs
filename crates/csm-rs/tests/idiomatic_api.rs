@@ -255,6 +255,21 @@ fn prepared_match_supports_restart_and_bounded_termination() {
 }
 
 #[test]
+fn prepared_match_terminates_with_cycle_detection_enabled() {
+    let angles: Vec<f64> = (0..41).map(|i| -1.0 + i as f64 * 0.05).collect();
+    let readings = vec![8.0; angles.len()];
+    let valid = vec![true; angles.len()];
+    let reference =
+        PreparedPolarScan::from_polar(angles.clone(), readings.clone(), valid.clone()).unwrap();
+    let sensor = PreparedPolarScan::from_polar(angles, readings, valid).unwrap();
+    let mut params = Params::default();
+    params.stopping.max_iterations = 12;
+    let mut workspace = Matcher::new(params).prepare(reference, sensor).unwrap();
+    let outcome = workspace.match_once().unwrap();
+    assert!(outcome.iterations <= 12);
+}
+
+#[test]
 fn cartesian_explicit_angles_are_validated_and_preserved() {
     let points = vec![[8.0, 0.0]; 21];
     let valid = vec![true; 21];
