@@ -1,4 +1,4 @@
-use csm_rs::{MatchOutcome, Matcher, Params, PolarScan};
+use csm_rs::{MatchOutcome, Matcher, Params, PolarScan, PreparedPolarScan};
 
 #[test]
 fn borrowed_polar_match_preserves_inputs() {
@@ -20,6 +20,29 @@ fn borrowed_polar_match_preserves_inputs() {
     assert_eq!(angles, angles_before);
     assert_eq!(readings, readings_before);
     assert_eq!(valid, valid_before);
+}
+
+#[test]
+fn prepared_scans_can_be_reused() {
+    let angles: Vec<f64> = (0..21).map(|i| -1.0 + i as f64 * 0.1).collect();
+    let readings: Vec<f64> = angles.iter().map(|a| 8.0 + 0.2 * a.cos()).collect();
+    let valid = vec![true; angles.len()];
+    let mut reference =
+        PreparedPolarScan::from_polar(angles.clone(), readings.clone(), valid.clone()).unwrap();
+    let mut sensor = PreparedPolarScan::from_polar(angles, readings, valid).unwrap();
+    let matcher = Matcher::new(Params::default());
+    assert!(
+        matcher
+            .match_prepared(&mut reference, &mut sensor)
+            .unwrap()
+            .valid
+    );
+    assert!(
+        matcher
+            .match_prepared(&mut reference, &mut sensor)
+            .unwrap()
+            .valid
+    );
 }
 
 #[test]

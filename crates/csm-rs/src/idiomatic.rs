@@ -10,6 +10,40 @@ pub struct PolarScan<'a> {
     valid: &'a [bool],
 }
 
+/// Owned, reusable polar scan storage for steady-state matching.
+#[derive(Clone, Debug)]
+pub struct PreparedPolarScan {
+    data: LaserData,
+}
+
+impl PreparedPolarScan {
+    pub fn from_polar(
+        angles: Vec<f64>,
+        readings: Vec<f64>,
+        valid: Vec<bool>,
+    ) -> Result<Self, LaserDataError> {
+        Ok(Self {
+            data: LaserData::from_polar(angles, readings, valid)?,
+        })
+    }
+
+    pub fn len(&self) -> usize {
+        self.data.nrays
+    }
+    pub fn is_empty(&self) -> bool {
+        self.data.nrays == 0
+    }
+    pub fn angles(&self) -> &[f64] {
+        &self.data.theta
+    }
+    pub fn readings(&self) -> &[f64] {
+        &self.data.readings
+    }
+    pub fn valid(&self) -> &[bool] {
+        &self.data.valid
+    }
+}
+
 impl<'a> PolarScan<'a> {
     /// Validate and borrow polar scan data. Inputs use metres and radians.
     pub fn new(
@@ -112,6 +146,23 @@ impl Matcher {
         )?;
         let mut result = SmResult::default();
         icp::sm_icp(&self.params, &mut reference, &mut sensor, &mut result)?;
+        Ok(result.into())
+    }
+
+    /// Match reusable scan storage. The scans are mutated only in their
+    /// private derived fields; their polar inputs remain unchanged.
+    pub fn match_prepared(
+        &self,
+        reference: &mut PreparedPolarScan,
+        sensor: &mut PreparedPolarScan,
+    ) -> Result<MatchOutcome, LaserDataError> {
+        let mut result = SmResult::default();
+        icp::sm_icp(
+            &self.params,
+            &mut reference.data,
+            &mut sensor.data,
+            &mut result,
+        )?;
         Ok(result.into())
     }
 }
