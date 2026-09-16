@@ -4,7 +4,7 @@ use csm_rs::{CartesianScan, Matcher};
 use std::fs;
 
 fn read(path: &str) -> Result<Vec<[f64; 2]>, Box<dyn std::error::Error>> {
-    Ok(fs::read_to_string(path)?
+    fs::read_to_string(path)?
         .lines()
         .filter(|l| !l.trim().is_empty())
         .map(|line| {
@@ -14,7 +14,7 @@ fn read(path: &str) -> Result<Vec<[f64; 2]>, Box<dyn std::error::Error>> {
                 fields.next().ok_or("missing y")?.parse()?,
             ])
         })
-        .collect::<Result<_, Box<dyn std::error::Error>>>()?)
+        .collect::<Result<_, Box<dyn std::error::Error>>>()
 }
 
 fn dots(points: &[[f64; 2]], color: &str) -> String {
