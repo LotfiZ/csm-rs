@@ -371,6 +371,12 @@ pub struct Matcher {
 }
 
 impl Matcher {
+    /// Construct a matcher after validating all numeric parameters.
+    pub fn try_new(params: Params) -> Result<Self, crate::params::ParamsError> {
+        params.validate()?;
+        Ok(Self { params })
+    }
+
     #[must_use]
     pub fn new(params: Params) -> Self {
         Self { params }

@@ -171,6 +171,13 @@ fn borrowed_polar_rejects_mismatched_lengths() {
 }
 
 #[test]
+fn checked_matcher_constructor_rejects_invalid_params() {
+    let mut params = Params::default();
+    params.stopping.max_iterations = -1;
+    assert!(Matcher::try_new(params).is_err());
+}
+
+#[test]
 fn cartesian_match_preserves_points() {
     let points: Vec<[f64; 2]> = (0..21)
         .map(|i| {
