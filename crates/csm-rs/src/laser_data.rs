@@ -406,7 +406,7 @@ pub enum LaserDataError {
     NanThetaBounds,
     /// C: FOV must be in [20 deg, 2.01 pi]
     FovOutOfRange,
-    /// C: min_theta must equal theta[0], max_theta must equal theta[last]
+    /// C: min_theta must equal `theta[0]`, max_theta must equal `theta[last]`
     ThetaBoundsMismatch,
     /// C: a valid ray must have non-NaN reading/theta and reading in (0, 100)
     BadValidRay(usize),
