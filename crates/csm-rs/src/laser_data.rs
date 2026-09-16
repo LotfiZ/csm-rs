@@ -508,6 +508,8 @@ impl LaserData {
 /// C: `ld_valid_fields()` in `laser_data.c`
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum LaserDataError {
+    /// An in-place prepared update exceeds the workspace capacity.
+    CapacityExceeded { capacity: usize, requested: usize },
     /// A per-ray field does not contain exactly `nrays` entries.
     InconsistentLengths {
         /// Name of the field with the wrong length.
@@ -540,6 +542,15 @@ pub enum LaserDataError {
 impl std::fmt::Display for LaserDataError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            Self::CapacityExceeded {
+                capacity,
+                requested,
+            } => {
+                write!(
+                    f,
+                    "prepared capacity {capacity} is smaller than requested {requested}"
+                )
+            }
             Self::InconsistentLengths {
                 field,
                 expected,

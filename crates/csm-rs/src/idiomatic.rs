@@ -299,6 +299,12 @@ impl PreparedPolarScan {
     /// Refresh readings in place while retaining all allocated storage.
     pub fn update(&mut self, readings: &[f64], valid: &[bool]) -> Result<(), LaserDataError> {
         if readings.len() != self.data.nrays {
+            if readings.len() > self.data.nrays {
+                return Err(LaserDataError::CapacityExceeded {
+                    capacity: self.data.nrays,
+                    requested: readings.len(),
+                });
+            }
             return Err(LaserDataError::InconsistentLengths {
                 field: "readings",
                 expected: self.data.nrays,
@@ -330,6 +336,12 @@ impl PreparedPolarScan {
         valid: &[bool],
     ) -> Result<(), LaserDataError> {
         if points.len() != self.data.nrays {
+            if points.len() > self.data.nrays {
+                return Err(LaserDataError::CapacityExceeded {
+                    capacity: self.data.nrays,
+                    requested: points.len(),
+                });
+            }
             return Err(LaserDataError::InconsistentLengths {
                 field: "points",
                 expected: self.data.nrays,
