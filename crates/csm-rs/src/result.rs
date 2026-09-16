@@ -5,7 +5,7 @@
 //! A failed match is a *result*, not an error (grilling Q9): check
 //! [`SmResult::valid`]. `Result` is reserved for malformed input.
 
-use crate::math::Mat3;
+use crate::math::{Mat3, Matrix};
 
 /// Outcome of one scan match.
 ///
@@ -26,10 +26,12 @@ pub struct SmResult {
     /// Closed-form covariance of `x`, present only when
     /// [`crate::Params::do_compute_covariance`]. C: `cov_x_m`
     pub cov_x: Option<Mat3>,
-    /// d(x)/d(y1), for covariance propagation. C: `dx_dy1_m`
-    pub dx_dy1: Option<Mat3>,
-    /// d(x)/d(y2), for covariance propagation. C: `dx_dy2_m`
-    pub dx_dy2: Option<Mat3>,
+    /// d(x)/d(y1), for covariance propagation. One column per reference ray.
+    /// C: `dx_dy1_m`
+    pub dx_dy1: Option<Matrix>,
+    /// d(x)/d(y2), for covariance propagation. One column per sensor ray.
+    /// C: `dx_dy2_m`
+    pub dx_dy2: Option<Matrix>,
 }
 
 #[cfg(test)]

@@ -104,6 +104,22 @@ static void print_double_array(const double *values, int count, int allow_null) 
     }
 }
 
+static void print_matrix_json(const gsl_matrix *matrix) {
+    printf("[");
+    for (size_t row = 0; row < matrix->size1; row++) {
+        if (row) printf(", ");
+        printf("[");
+        for (size_t col = 0; col < matrix->size2; col++) {
+            if (col) printf(", ");
+            double value = gsl_matrix_get(matrix, row, col);
+            if (isnan(value)) printf("null");
+            else printf("%.17g", value);
+        }
+        printf("]");
+    }
+    printf("]");
+}
+
 static void print_scan_json(const char *name, LDP ld) {
     printf("    \"%s\": {\n", name);
     printf("      \"min_theta\": %.17g,\n", ld->min_theta);
@@ -183,6 +199,7 @@ struct CaseConfig {
     int outliers_remove_doubles;
     double epsilon_xy;
     double epsilon_theta;
+    int do_compute_covariance;
     struct FeatureFlags features;
 };
 
@@ -197,6 +214,7 @@ static struct CaseConfig default_case_config(void) {
         .outliers_remove_doubles = 1,
         .epsilon_xy = 0.0001,
         .epsilon_theta = 0.0001,
+        .do_compute_covariance = 0,
         .features = {
             .use_corr_tricks = 1,
             .do_alpha_test = 0,
@@ -239,6 +257,7 @@ static void run_case(const char *name, LDP ref, LDP sens,
     params.use_point_to_line_distance = config->features.use_point_to_line_distance;
     params.max_angular_correction_deg = config->features.max_angular_correction_deg;
     params.do_alpha_test_thresholdDeg = config->features.alpha_test_threshold_deg;
+    params.do_compute_covariance = config->do_compute_covariance;
 
     sm_icp(&params, &result);
 
@@ -256,7 +275,16 @@ static void run_case(const char *name, LDP ref, LDP sens,
     printf("      \"error\": %.17g,\n", result.error);
     printf("      \"iterations\": %d,\n", result.iterations);
     printf("      \"correspondence_hash\": %u,\n", ld_corr_hash(sens));
-    printf("      \"nvalid\": %d\n", result.nvalid);
+    printf("      \"nvalid\": %d", result.nvalid);
+    if (result.valid && config->do_compute_covariance) {
+        printf(",\n      \"cov_x\": ");
+        print_matrix_json(result.cov_x_m);
+        printf(",\n      \"dx_dy1\": ");
+        print_matrix_json(result.dx_dy1_m);
+        printf(",\n      \"dx_dy2\": ");
+        print_matrix_json(result.dx_dy2_m);
+    }
+    printf("\n");
     printf("    }\n");
     printf("  }\n");
 }
@@ -290,6 +318,25 @@ int main(void) {
     printf("  \"schema\": \"csm-rs-fixture/v1\",\n");
     printf("  \"cases\": [\n");
     run_case("identity", ref, sens, &config);
+
+    /* A deliberately offset, single-iteration match exercises Censi's exact
+     * closed-form covariance and both range-derivative matrices. */
+    ref = ld_alloc_new(NRAYS);
+    sens = ld_alloc_new(NRAYS);
+    build_scan(ref);
+    build_scan(sens);
+    config = default_case_config();
+    config.first_guess[0] = 0.25;
+    config.first_guess[1] = -0.15;
+    config.first_guess[2] = 0.04;
+    config.max_iterations = 1;
+    config.restart = 0;
+    config.outliers_max_perc = 1.0;
+    config.outliers_adaptive_order = 1.0;
+    config.outliers_remove_doubles = 0;
+    config.do_compute_covariance = 1;
+    printf(",\n");
+    run_case("covariance", ref, sens, &config);
 
     /* Percentile-only trim: the twenty perturbed rays have a positive
      * point-to-line error, while the adaptive limit is disabled at order 1. */

@@ -7,9 +7,11 @@
 //! selected strategy, rejects outliers, solves the closed-form PlICP update,
 //! and stops when the pose correction is below both configured thresholds.
 //! Correspondence-hash oscillation detection and the six-perturbation restart
-//! shell follow the C control flow; covariance is added by a later ticket.
+//! shell follow the C control flow. Optional Censi covariance is evaluated
+//! after the final correspondence set has been selected.
 
 use crate::correspondence::{find_correspondences, kill_outliers_double, kill_outliers_trim};
+use crate::covariance::compute_covariance_exact;
 use crate::laser_data::LaserData;
 use crate::math::{corr_hash, ominus, pose_diff};
 use crate::params::DistanceMetric;
@@ -79,6 +81,18 @@ pub(crate) fn sm_icp(
     result.error = outcome.error;
     result.iterations = outcome.iterations;
     result.nvalid = if outcome.success { outcome.nvalid } else { 0 };
+
+    if outcome.success && params.do_compute_covariance {
+        if let Some(covariance) = compute_covariance_exact(laser_ref, laser_sens, outcome.x) {
+            result.cov_x = Some(
+                covariance
+                    .cov0_x
+                    .scale(params.correspondence.sigma * params.correspondence.sigma),
+            );
+            result.dx_dy1 = Some(covariance.dx_dy1);
+            result.dx_dy2 = Some(covariance.dx_dy2);
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug)]

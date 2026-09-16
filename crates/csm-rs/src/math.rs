@@ -71,6 +71,15 @@ impl Mat3 {
         Self { data }
     }
 
+    /// Scale every entry by a scalar.
+    ///
+    /// C: `sc()` in `sm/lib/egsl/egsl_ops.c`.
+    pub fn scale(&self, scale: f64) -> Self {
+        Self::new(std::array::from_fn(|row| {
+            std::array::from_fn(|col| self.data[row][col] * scale)
+        }))
+    }
+
     pub fn transpose(&self) -> Self {
         Self::new(std::array::from_fn(|r| {
             std::array::from_fn(|c| self.data[c][r])
@@ -107,6 +116,44 @@ impl Mat3 {
             [c01 * s, c11 * s, c21 * s],
             [c02 * s, c12 * s, c22 * s],
         ]))
+    }
+}
+
+/// Dynamically sized dense matrix with row-major rows.
+///
+/// C: `gsl_matrix` in `sm/csm/icp/icp_covariance.c`. The covariance itself
+/// is always 3×3, but its input-derivative matrices are 3×N, where N is the
+/// number of rays in the corresponding scan.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Matrix {
+    /// Matrix entries grouped by row.
+    ///
+    /// C: `gsl_matrix` elements accessed by `gsl_matrix_get()`.
+    pub data: Vec<Vec<f64>>,
+}
+
+impl Matrix {
+    /// Construct a zero-filled matrix.
+    ///
+    /// C: `zeros(rows, cols)` in `sm/lib/egsl/egsl_ops.c`.
+    pub fn zeros(rows: usize, cols: usize) -> Self {
+        Self {
+            data: vec![vec![0.0; cols]; rows],
+        }
+    }
+
+    /// Number of rows.
+    ///
+    /// C: `gsl_matrix::size1`.
+    pub fn rows(&self) -> usize {
+        self.data.len()
+    }
+
+    /// Number of columns, or zero for a matrix without rows.
+    ///
+    /// C: `gsl_matrix::size2`.
+    pub fn cols(&self) -> usize {
+        self.data.first().map_or(0, Vec::len)
     }
 }
 
@@ -419,6 +466,15 @@ mod tests {
         let id = Mat3::new([[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]]);
         assert_eq!(a.mul(&id).data, a.data);
         assert_eq!(id.mul(&a).data, a.data);
+    }
+
+    #[test]
+    fn mat3_scale_known_product() {
+        let a = Mat3::new([[1.0, -2.0, 3.0], [4.0, 5.0, -6.0], [7.0, 8.0, 9.0]]);
+        assert_eq!(
+            a.scale(0.5).data,
+            [[0.5, -1.0, 1.5], [2.0, 2.5, -3.0], [3.5, 4.0, 4.5]]
+        );
     }
 
     #[test]

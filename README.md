@@ -7,8 +7,8 @@ closed-form estimate of the matching covariance
 
 ## Status
 
-Early scaffold. Port scope is the `sm_icp` path only (ICP/PlICP + covariance);
-GPM/HSM/MbICP, Cairo drawing, and the CLI apps are intentionally excluded.
+Port scope is the `sm_icp` path only (ICP/PlICP + covariance); GPM/HSM/MbICP,
+Cairo drawing, and the CLI apps are intentionally excluded.
 
 Design decisions were captured in a structured grilling session — see module
 docs for the C cross-references and per-decision rationale.
@@ -22,8 +22,8 @@ expected results) checked into `crates/csm-rs/tests/fixtures/`. The public
 tracer path checks pose to 1e-9 and `iterations`/`nvalid` exactly, including
 fixtures for duplicate removal and both trimming thresholds. The crate-
 internal seam checks that tricks and naive correspondence search produce the
-same keys and hash. The full target validation also covers covariance to
-1e-6 relative error as those stages land.
+same keys and hash. The covariance fixture checks the closed-form result and
+its derivative matrices to 1e-6 relative error.
 
 ## Workspace layout
 

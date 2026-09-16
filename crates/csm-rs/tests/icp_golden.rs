@@ -72,6 +72,12 @@ struct ExpectedResult {
     iterations: i32,
     correspondence_hash: u32,
     nvalid: i32,
+    #[serde(default)]
+    cov_x: Option<[[f64; 3]; 3]>,
+    #[serde(default)]
+    dx_dy1: Option<Vec<Vec<Option<f64>>>>,
+    #[serde(default)]
+    dx_dy2: Option<Vec<Vec<Option<f64>>>>,
 }
 
 fn read_fixture() -> Fixture {
@@ -156,6 +162,38 @@ fn correspondence_keys(scan: &LaserData) -> Vec<Option<(i32, i32)>> {
         .collect()
 }
 
+fn assert_relative(actual: f64, expected: f64, label: &str) {
+    let scale = expected.abs().max(1e-12);
+    assert!(
+        (actual - expected).abs() <= 1e-6 * scale,
+        "{label}: {actual} != {expected}"
+    );
+}
+
+fn assert_dynamic_matrix(
+    actual: &csm_rs::math::Matrix,
+    expected: &[Vec<Option<f64>>],
+    label: &str,
+) {
+    assert_eq!(actual.rows(), expected.len(), "{label}: row count");
+    for (row, expected_values) in expected.iter().enumerate() {
+        assert_eq!(
+            actual.data[row].len(),
+            expected_values.len(),
+            "{label}: column count at row {row}"
+        );
+        for (col, expected) in expected_values.iter().enumerate() {
+            let actual = actual.data[row][col];
+            match expected {
+                Some(expected) => {
+                    assert_relative(actual, *expected, &format!("{label}[{row}][{col}]"))
+                }
+                None => assert!(actual.is_nan(), "{label}[{row}][{col}] should be NaN"),
+            }
+        }
+    }
+}
+
 #[test]
 fn fixture_cases_match_c_reference_and_each_strategy() {
     let fixture = read_fixture();
@@ -194,6 +232,42 @@ fn fixture_cases_match_c_reference_and_each_strategy() {
             "case {}: final correspondence hash",
             case.name
         );
+
+        match (
+            case.expected.cov_x,
+            case.expected.dx_dy1.as_ref(),
+            case.expected.dx_dy2.as_ref(),
+        ) {
+            (Some(expected), Some(expected_dx_dy1), Some(expected_dx_dy2)) => {
+                assert!(params.do_compute_covariance, "case {}", case.name);
+                let actual = result.cov_x.as_ref().expect("covariance result");
+                for (row, values) in expected.iter().enumerate() {
+                    for (col, expected) in values.iter().enumerate() {
+                        assert_relative(
+                            actual.data[row][col],
+                            *expected,
+                            &format!("case {}: cov_x[{row}][{col}]", case.name),
+                        );
+                    }
+                }
+                assert_dynamic_matrix(
+                    result.dx_dy1.as_ref().expect("dx_dy1 result"),
+                    expected_dx_dy1,
+                    &format!("case {}: dx_dy1", case.name),
+                );
+                assert_dynamic_matrix(
+                    result.dx_dy2.as_ref().expect("dx_dy2 result"),
+                    expected_dx_dy2,
+                    &format!("case {}: dx_dy2", case.name),
+                );
+            }
+            (None, None, None) => {
+                assert!(result.cov_x.is_none(), "case {}", case.name);
+                assert!(result.dx_dy1.is_none(), "case {}", case.name);
+                assert!(result.dx_dy2.is_none(), "case {}", case.name);
+            }
+            _ => panic!("case {} has incomplete covariance expectation", case.name),
+        }
 
         // C's tricks search intentionally omits the optional alpha test. Keep
         // the strategy-equivalence assertion for the common path and let an
