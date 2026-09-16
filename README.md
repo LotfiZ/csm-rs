@@ -37,44 +37,114 @@ their different native math paths.
 
 ## Quick start
 
-Install Rust, then run the complete fixture suite from the repository root:
+Install Rust, then run the complete test suite from the repository root:
 
 ```sh
 cargo test --all-targets --all-features
 ```
 
-For an application, construct each scan from angles, readings, and validity
-flags. The matcher returns an error for malformed scan storage and puts a
-normal convergence failure in `result.valid`:
+The supported interface is arranged around scans, configuration, matching, and
+results. A minimal match borrows caller-owned buffers and uses an identity
+initial pose:
 
 ```rust
-use csm_rs::{sm_icp, LaserData, Params, SmResult};
+use csm_rs::{Matcher, Params, PolarScan};
 
 fn match_scans(
-    angles: Vec<f64>,
-    reference_readings: Vec<f64>,
-    sensor_readings: Vec<f64>,
-    valid: Vec<bool>,
-) -> Result<SmResult, Box<dyn std::error::Error>> {
-    let mut reference = LaserData::from_polar(
-        angles.clone(),
-        reference_readings,
-        valid.clone(),
-    )?;
-    let mut sensor = LaserData::from_polar(angles, sensor_readings, valid)?;
-    let mut result = SmResult::default();
-    sm_icp(&Params::default(), &mut reference, &mut sensor, &mut result)?;
-    Ok(result)
+    angles: &[f64],
+    reference_readings: &[f64],
+    sensor_readings: &[f64],
+    valid: &[bool],
+) -> Result<(), Box<dyn std::error::Error>> {
+    let reference = PolarScan::new(angles, reference_readings, valid)?;
+    let sensor = PolarScan::new(angles, sensor_readings, valid)?;
+    let outcome = Matcher::new(Params::default())?.match_polar(reference, sensor)?;
+    if outcome.valid {
+        println!("sensor-to-reference pose = {:?}", outcome.pose);
+    }
+    Ok(())
 }
 ```
 
-`result.valid == true` means the scans matched. `false` means the inputs were
+`outcome.valid == true` means the scans matched; `false` means the inputs were
 well-formed but ICP did not produce a usable match. A `?` error means the
-input arrays or scan values violate CSM's input contract. Invalid lidar rays
-should have `valid[i] == false`; their reading can be `NaN`.
+input arrays or scan values violate the input contract. Missing lidar returns
+should have `valid[i] == false`; they keep their position in the scan order,
+and their reading can be `NaN`.
 
-For a beginner-friendly example that creates laser data, prints every beam in
-a readable table, and displays the estimated movement, run:
+### Coordinate contract
+
+Inputs use **metres and radians**. Each scan is centered on its own sensor
+origin, and rays are **ordered by bearing**: a polar ray at `theta` with
+reading `r` is the sensor-frame point `[r cos(theta), r sin(theta)]`, and a
+Cartesian ray is its own `[x, y]`. The matcher relies on that ordering and
+never sorts or drops points; unordered point-cloud registration is out of
+scope. The result is the rigid transform mapping sensor-scan coordinates into
+reference-scan coordinates: `R(theta) * p + (x, y)` with counter-clockwise
+`theta`. [`Pose`] documents composition.
+
+### Initial pose and reference selection
+
+`match_polar` and `match_cartesian` use the identity initial pose. Pass an
+explicit guess (for example from odometry) with `match_polar_from` or
+`match_cartesian_from`:
+
+```rust
+use csm_rs::{Matcher, Params, PolarScan, Pose};
+
+let matcher = Matcher::new(Params::default())?;
+let guess = Pose::new(0.10, -0.05, 0.02);
+let outcome = matcher.match_polar_from(reference, sensor, guess)?;
+# Ok::<(), Box<dyn std::error::Error>>(())
+```
+
+The reference scan is always chosen explicitly by the caller; the library
+never replaces it implicitly.
+
+### Uncertainty
+
+Matching defaults to pose-only. Request the closed-form covariance and
+derivative matrices explicitly:
+
+```rust
+use csm_rs::{Matcher, Params};
+
+let params = Params { do_compute_covariance: true, ..Params::default() };
+let matcher = Matcher::new(params)?;
+# Ok::<(), Box<dyn std::error::Error>>(())
+```
+
+`MatchOutcome::covariance_status` reports disabled, computed, or failed
+uncertainty independently of whether the pose itself is usable.
+
+### Reusable storage
+
+For fixed-rate applications, build a `PreparedMatcher` once and update its
+frames in place:
+
+```text
+let matcher = Matcher::default_pose_only();
+let mut workspace = matcher.prepare(reference, sensor)?;
+workspace.update_sensor(&next_readings, &next_valid)?;
+let estimate = workspace.match_once()?;
+# Ok::<(), csm_rs::ScanError>(())
+```
+
+`Matcher::prepare_polar`, `Matcher::prepare_cartesian`, and `Matcher::prepare`
+make scan ownership and workspace reuse explicit. `PreparedMatcher::capacities`
+and `workspace_bytes` support embedded integrations.
+
+### Diagnostics
+
+`MatchOutcome::termination` identifies whether a match converged, reached the
+iteration limit, found no correspondences, or failed for another reason.
+`PreparedMatcher::match_once_traced` reports real ICP iteration snapshots
+(pose, error, and valid correspondences) for inspection.
+
+### Examples
+
+A beginner-friendly example creates laser data, prints every beam, and shows
+the estimated movement:
 
 ```sh
 cargo run -p csm-rs --example scan_matching
@@ -84,98 +154,15 @@ The example simulates a robot scanning a square room. It needs no input files,
 extra dependencies, or C installation. Change `FIRST_SENSOR_POSE` in
 `examples/scan_matching.rs` to try another small movement.
 
-Performance baselines are dependency-free and reproducible in release mode:
+The prepared benchmark reports both pose-only and uncertainty modes in release
+mode:
 
 ```sh
-cargo run --release -p csm-rs --example benchmark_baseline
 cargo run --release -p csm-rs --example benchmark_prepared
 ```
 
 For a repeatable release resource report (optimized example sizes plus the
 prepared latency benchmark), run `scripts/measure-release.sh`.
-
-The prepared benchmark reports both full covariance mode and the pose-only
-mode, allowing deployments to measure the cost of uncertainty outputs on their
-own hardware.
-
-The idiomatic API borrows application buffers and returns a typed outcome:
-
-```rust
-use csm_rs::{Matcher, Params, PolarScan};
-
-let reference = PolarScan::new(&angles, &reference_readings, &valid)?;
-let sensor = PolarScan::new(&angles, &sensor_readings, &valid)?;
-let outcome = Matcher::new(Params::default()).match_polar(reference, sensor)?;
-if outcome.converged() {
-    println!("pose = {:?}", outcome.pose);
-}
-```
-
-The legacy `sm_icp` function remains available for conformance tooling and
-existing callers. It is frozen and receives no new capabilities; new
-integrations should use `Matcher::prepare_polar`,
-`Matcher::prepare_cartesian`, or `Matcher::prepare` so scan ownership and
-workspace reuse are explicit.
-
-For fixed-rate applications, create `PreparedPolarScan` values once and reuse
-them with `match_prepared` or `match_prepared_into`. Ordered Cartesian points
-are also accepted through `CartesianScan`; the idiomatic validator has no
-artificial upper ray-count limit. To generate a browser-viewable HTML
-demonstration, run:
-
-```sh
-cargo run --release -p csm-rs --example visual_match > match.html
-```
-
-To run the local browser-backed demo instead:
-
-```sh
-cargo run --release -p csm-rs --example interactive_server
-```
-
-Then open `http://127.0.0.1:7878`.
-Pass an address as the first argument when another interface or port is needed,
-for example `cargo run --example interactive_server -- 0.0.0.0:8080`.
-
-To inspect imported Cartesian scans, provide one file (or a reference and
-sensor pair) containing one `x y` point per line:
-
-```sh
-cargo run --release -p csm-rs --example import_scan -- reference.txt sensor.txt > imported.html
-```
-
-Prepared scans can be refreshed in place with `update` or
-`update_cartesian`, retaining their allocation capacity. The
-`match_prepared_observed` method invokes a caller-supplied closure with each
-outcome, which is suitable for metrics, logging, or a UI adapter without a
-runtime logging dependency.
-
-`MatchOutcome::termination` identifies whether a match converged, reached the
-iteration limit, found no correspondences, or failed for another reason.
-`MatchOutcome::covariance_status` separately reports disabled, computed, and
-failed uncertainty diagnostics, so an accepted pose remains usable when its
-optional covariance cannot be produced.
-
-Embedded integrations can inspect `PreparedMatcher::workspace_bytes()` and
-`capacities()` before entering a fixed-rate loop.
-
-For a fixed-shape stream, `Matcher::prepare` retains the scan and ICP
-workspace across frames:
-
-```text
-let mut workspace = Matcher::pose_only(Params::default()).prepare(reference, sensor)?;
-workspace.update_sensor(&next_readings, &next_valid)?;
-let estimate = workspace.match_once()?;
-# Ok::<(), csm_rs::LaserDataError>(())
-```
-
-When covariance is not needed, `Matcher::pose_only(Params::default())`
-disables the optional covariance and derivative calculations for a smaller
-embedded runtime path.
-
-Use `Matcher::try_new(params)` when configuration comes from a file or another
-runtime source; it validates finite values, ranges, and the iteration limit
-before the matcher is constructed.
 
 Regenerate the corpus with the C reference source checked out at
 `/home/agx/workspace/csm-src`:

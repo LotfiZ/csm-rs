@@ -199,6 +199,7 @@ impl Mat4 {
     /// Return the transpose of this matrix.
     ///
     /// C: transpose operations in `sm/lib/gpc/gpc.c`
+    #[cfg(test)]
     pub fn transpose(&self) -> Self {
         Self::new(std::array::from_fn(|r| {
             std::array::from_fn(|c| self.data[c][r])
@@ -208,6 +209,7 @@ impl Mat4 {
     /// Multiply this matrix by `other`.
     ///
     /// C: `gsl_blas_dgemm()` usage in `sm/lib/gpc/gpc.c`
+    #[cfg(test)]
     pub fn mul(&self, other: &Mat4) -> Mat4 {
         let (a, b) = (self.data, other.data);
         Mat4::new(std::array::from_fn(|r| {

@@ -206,11 +206,6 @@ pub struct WeightParams {
 /// C: `struct sm_params` in `sm/csm/algos.h`
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Params {
-    /// First guess for the displacement. C: `first_guess`
-    pub first_guess: [f64; 3],
-    /// Robot's laser pose (used by `sm_icp_xy`, not `sm_icp`).
-    /// C: `laser[3]` = laser_x, laser_y, laser_theta (all default 0.0)
-    pub laser_pose: [f64; 3],
     /// Sensor reading interval applied before correspondence search.
     /// C: `min_reading`, `max_reading`
     pub reading_bounds: ReadingBounds,
@@ -261,12 +256,7 @@ impl std::error::Error for ParamsError {}
 impl Params {
     /// Validate numeric settings before constructing a matcher.
     pub fn validate(&self) -> Result<(), ParamsError> {
-        let finite = self
-            .first_guess
-            .iter()
-            .chain(self.laser_pose.iter())
-            .all(|v| v.is_finite())
-            && self.reading_bounds.min.is_finite()
+        let finite = self.reading_bounds.min.is_finite()
             && self.reading_bounds.max.is_finite()
             && self.correction_limits.max_angular_deg.is_finite()
             && self.correction_limits.max_linear.is_finite()
@@ -330,8 +320,6 @@ mod tests {
         // Transcribed from sm/csm/sm_options.c — this test pins the
         // transcription against accidental edits.
         let p = Params::default();
-        assert_eq!(p.first_guess, [0.0, 0.0, 0.0]);
-        assert_eq!(p.laser_pose, [0.0, 0.0, 0.0]);
         assert_eq!(p.reading_bounds.min, 0.0);
         assert_eq!(p.reading_bounds.max, 1000.0);
         assert_eq!(p.correction_limits.max_angular_deg, 90.0);

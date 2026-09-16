@@ -1,7 +1,8 @@
-use csm_rs::laser_data::LaserData;
-use csm_rs::math::corr_hash;
-use csm_rs::params::{CorrespondenceSearch, DistanceMetric, Params};
-use csm_rs::{sm_icp, SmResult};
+use crate::laser_data::LaserData;
+use crate::math::corr_hash;
+use crate::params::{CorrespondenceSearch, DistanceMetric, Params};
+use crate::icp::sm_icp;
+use crate::result::SmResult;
 use serde::Deserialize;
 
 const POSE_TOLERANCE: f64 = 1e-9;
@@ -93,7 +94,7 @@ struct ExpectedResult {
 }
 
 fn read_fixture() -> Fixture {
-    let json = include_str!("fixtures/identity.json");
+    let json = include_str!("../tests/fixtures/identity.json");
     serde_json::from_str(json).expect("identity fixture must match its schema")
 }
 
@@ -128,10 +129,7 @@ fn build_scan(scan: &FixtureScan) -> LaserData {
 }
 
 fn build_params(params: &FixtureParams) -> Params {
-    let mut result = Params {
-        first_guess: params.first_guess,
-        ..Params::default()
-    };
+    let mut result = Params::default();
     result.correction_limits.max_angular_deg = params.max_angular_correction_deg;
     result.correction_limits.max_linear = params.max_linear_correction;
     result.stopping.max_iterations = params.max_iterations;
@@ -174,8 +172,14 @@ fn run_case(params: &Params, case: &Case) -> (SmResult, LaserData) {
     let mut laser_ref = build_scan(&case.laser_ref);
     let mut laser_sens = build_scan(&case.laser_sens);
     let mut result = SmResult::default();
-    sm_icp(params, &mut laser_ref, &mut laser_sens, &mut result)
-        .expect("golden fixture scans must pass input validation");
+    sm_icp(
+        params,
+        case.params.first_guess,
+        &mut laser_ref,
+        &mut laser_sens,
+        &mut result,
+    )
+    .expect("golden fixture scans must pass input validation");
     (result, laser_sens)
 }
 
@@ -195,7 +199,7 @@ fn assert_relative(actual: f64, expected: f64, label: &str) {
 }
 
 fn assert_dynamic_matrix(
-    actual: &csm_rs::math::Matrix,
+    actual: &crate::math::Matrix,
     expected: &[Vec<Option<f64>>],
     label: &str,
 ) {
@@ -409,6 +413,7 @@ fn fixture_cases_match_c_reference_and_each_strategy() {
         let mut first_naive_result = SmResult::default();
         sm_icp(
             &first_tricks_params,
+            case.params.first_guess,
             &mut first_tricks_ref,
             &mut first_tricks_sens,
             &mut first_tricks_result,
@@ -416,6 +421,7 @@ fn fixture_cases_match_c_reference_and_each_strategy() {
         .expect("golden fixture scans must pass input validation");
         sm_icp(
             &first_naive_params,
+            case.params.first_guess,
             &mut first_naive_ref,
             &mut first_naive_sens,
             &mut first_naive_result,

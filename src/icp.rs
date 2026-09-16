@@ -14,7 +14,7 @@ use crate::correspondence::{
     find_correspondences, kill_outliers_double_with_scratch, kill_outliers_trim_with_scratch,
 };
 use crate::covariance::compute_covariance_exact;
-use crate::laser_data::{LaserData, LaserDataError};
+use crate::laser_data::{LaserData, ScanError};
 use crate::math::{corr_hash_iter, ominus, pose_diff};
 use crate::params::DistanceMetric;
 use crate::params::Params;
@@ -26,25 +26,27 @@ use crate::solver::{compute_next_estimate_with_scratch, GpcCorrespondence};
 /// C: `sm/csm/icp/icp.c:sm_icp()`
 pub(crate) fn sm_icp(
     params: &Params,
+    guess: [f64; 3],
     laser_ref: &mut LaserData,
     laser_sens: &mut LaserData,
     result: &mut SmResult,
-) -> Result<(), LaserDataError> {
+) -> Result<(), ScanError> {
     let mut scratch = IcpScratch::new(
         laser_ref.nrays,
         laser_sens.nrays,
         params.stopping.max_iterations.max(0) as usize,
     );
-    sm_icp_with_scratch(params, laser_ref, laser_sens, result, &mut scratch)
+    sm_icp_with_scratch(params, guess, laser_ref, laser_sens, result, &mut scratch)
 }
 
 pub(crate) fn sm_icp_with_scratch(
     params: &Params,
+    guess: [f64; 3],
     laser_ref: &mut LaserData,
     laser_sens: &mut LaserData,
     result: &mut SmResult,
     scratch: &mut IcpScratch,
-) -> Result<(), LaserDataError> {
+) -> Result<(), ScanError> {
     *result = SmResult::default();
 
     // C: `ld_valid_fields()` is checked before any input mutation.
@@ -86,12 +88,12 @@ pub(crate) fn sm_icp_with_scratch(
     if params.correspondence.do_visibility_test {
         // C: `visibilityTest(laser_ref, x_old)` and
         // `visibilityTest(laser_sens, ominus(x_old))` in `icp.c`.
-        laser_ref.visibility_test(&params.first_guess);
-        let sensor_viewpoint = ominus(params.first_guess);
+        laser_ref.visibility_test(&guess);
+        let sensor_viewpoint = ominus(guess);
         laser_sens.visibility_test(&sensor_viewpoint);
     }
 
-    let outcome = icp_loop_with_restart(params, laser_ref, laser_sens, scratch);
+    let outcome = icp_loop_with_restart(params, guess, laser_ref, laser_sens, scratch);
     result.valid = outcome.success;
     result.x = outcome.x;
     result.error = outcome.error;
@@ -165,11 +167,12 @@ impl IcpScratch {
 /// C: `sm/csm/icp/icp.c:sm_icp()`
 fn icp_loop_with_restart(
     params: &Params,
+    guess: [f64; 3],
     laser_ref: &LaserData,
     laser_sens: &mut LaserData,
     scratch: &mut IcpScratch,
 ) -> IcpOutcome {
-    let initial = icp_loop(params, params.first_guess, laser_ref, laser_sens, scratch);
+    let initial = icp_loop(params, guess, laser_ref, laser_sens, scratch);
     if !initial.success {
         return initial;
     }
