@@ -129,6 +129,8 @@ cargo run --release -p csm-rs --example interactive_server
 ```
 
 Then open `http://127.0.0.1:7878`.
+Pass an address as the first argument when another interface or port is needed,
+for example `cargo run --example interactive_server -- 0.0.0.0:8080`.
 
 Prepared scans can be refreshed in place with `update` or
 `update_cartesian`, retaining their allocation capacity. The
