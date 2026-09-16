@@ -195,24 +195,7 @@ impl PreparedMatcher {
             &mut result,
             &mut self.scratch,
         )?;
-        let mut outcome: MatchOutcome = result.into();
-        outcome.covariance_status = if !self.matcher.params.do_compute_covariance {
-            CovarianceStatus::Disabled
-        } else if outcome.has_uncertainty() {
-            CovarianceStatus::Computed
-        } else {
-            CovarianceStatus::Failed
-        };
-        outcome.termination = if outcome.valid {
-            TerminationReason::Converged
-        } else if outcome.nvalid == 0 {
-            TerminationReason::NoCorrespondences
-        } else if outcome.iterations >= self.matcher.params.stopping.max_iterations {
-            TerminationReason::IterationLimit
-        } else {
-            TerminationReason::Failed
-        };
-        Ok(outcome)
+        Ok(MatchOutcome::from(result).with_diagnostics(&self.matcher.params))
     }
 
     /// Match into caller-owned result storage for allocation-free result reuse.
@@ -449,6 +432,26 @@ impl MatchOutcome {
     pub fn has_uncertainty(&self) -> bool {
         self.covariance.is_some() && self.dx_dy_reference.is_some() && self.dx_dy_sensor.is_some()
     }
+
+    fn with_diagnostics(mut self, params: &Params) -> Self {
+        self.covariance_status = if !params.do_compute_covariance {
+            CovarianceStatus::Disabled
+        } else if self.has_uncertainty() {
+            CovarianceStatus::Computed
+        } else {
+            CovarianceStatus::Failed
+        };
+        self.termination = if self.valid {
+            TerminationReason::Converged
+        } else if self.nvalid == 0 {
+            TerminationReason::NoCorrespondences
+        } else if self.iterations >= params.stopping.max_iterations {
+            TerminationReason::IterationLimit
+        } else {
+            TerminationReason::Failed
+        };
+        self
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -585,7 +588,7 @@ impl Matcher {
         )?;
         let mut result = SmResult::default();
         icp::sm_icp(&self.params, &mut reference, &mut sensor, &mut result)?;
-        Ok(result.into())
+        Ok(MatchOutcome::from(result).with_diagnostics(&self.params))
     }
 
     /// Match ordered Cartesian scans by converting them once to the engine's
@@ -604,7 +607,7 @@ impl Matcher {
         let mut sensor = to_polar(sensor)?;
         let mut result = SmResult::default();
         icp::sm_icp(&self.params, &mut reference, &mut sensor, &mut result)?;
-        Ok(result.into())
+        Ok(MatchOutcome::from(result).with_diagnostics(&self.params))
     }
 
     /// Match reusable scan storage. The scans are mutated only in their
@@ -621,7 +624,7 @@ impl Matcher {
             &mut sensor.data,
             &mut result,
         )?;
-        Ok(result.into())
+        Ok(MatchOutcome::from(result).with_diagnostics(&self.params))
     }
 
     /// Reuse a caller-owned legacy result buffer for a prepared match.
