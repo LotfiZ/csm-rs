@@ -112,7 +112,8 @@ if outcome.converged() {
 ```
 
 The legacy `sm_icp` function remains available for conformance tooling and
-existing callers. New integrations should use `Matcher::prepare_polar`,
+existing callers. It is frozen and receives no new capabilities; new
+integrations should use `Matcher::prepare_polar`,
 `Matcher::prepare_cartesian`, or `Matcher::prepare` so scan ownership and
 workspace reuse are explicit.
 
