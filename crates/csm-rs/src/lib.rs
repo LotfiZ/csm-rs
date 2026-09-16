@@ -31,7 +31,9 @@ pub mod params;
 pub mod result;
 pub mod solver;
 
-pub use idiomatic::{CartesianScan, MatchOutcome, Matcher, PolarScan, PreparedPolarScan};
+pub use idiomatic::{
+    CartesianScan, MatchOutcome, MatchStatus, Matcher, PolarScan, PreparedPolarScan,
+};
 pub use laser_data::{LaserData, LaserDataError};
 pub use params::Params;
 pub use result::SmResult;
