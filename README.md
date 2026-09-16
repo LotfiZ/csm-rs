@@ -107,5 +107,11 @@ closed-form solver in `solver.rs` is derivative work of Andrea Censi's
 vendored `gpc` solver, released under GPLv2-or-later. The checked-in fixture
 generator is a separate throwaway C tool and is not part of the Rust crate.
 
-The Rust crate is therefore dual-licensed **LGPL-3.0-only OR
-GPL-2.0-or-later** — see `LICENSE-LGPL-3.0` and `LICENSE-GPL-2.0`.
+The current Rust crate is distributed under **GPL-2.0-or-later** because it
+contains a direct port of the upstream gpc solver, whose source is
+GPL-2.0-or-later. The remaining CSM-derived algorithm is LGPL-3.0, and its
+license text is included for attribution. See NOTICE.md for component-level
+provenance. The crate cannot claim an LGPL-only option while the GPL-derived
+solver remains part of the combined work. A future clean-room solver may enable
+a different license declaration; that would require a separate provenance
+review.

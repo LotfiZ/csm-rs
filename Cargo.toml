@@ -5,7 +5,9 @@ members = ["crates/csm-rs"]
 
 [workspace.package]
 edition = "2021"
-license = "LGPL-3.0-only OR GPL-2.0-or-later"
+# The current crate includes the GPL-2.0-or-later gpc-derived solver.
+# Revisit this metadata only after a clean-room solver replaces it.
+license = "GPL-2.0-or-later"
 repository = "https://github.com/LotfiZ/csm-rs"
 
 [profile.release]
