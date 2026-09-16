@@ -1,5 +1,6 @@
 use csm_rs::{
     CartesianScan, MatchOutcome, MatchStatus, Matcher, Params, PolarScan, PreparedPolarScan,
+    SmResult,
 };
 
 #[test]
@@ -47,6 +48,21 @@ fn prepared_scans_can_be_reused() {
             .unwrap()
             .valid
     );
+}
+
+#[test]
+fn prepared_match_can_reuse_result_storage() {
+    let angles: Vec<f64> = (0..21).map(|i| -1.0 + i as f64 * 0.1).collect();
+    let readings: Vec<f64> = angles.iter().map(|a| 8.0 + 0.2 * a.cos()).collect();
+    let valid = vec![true; angles.len()];
+    let mut reference =
+        PreparedPolarScan::from_polar(angles.clone(), readings.clone(), valid.clone()).unwrap();
+    let mut sensor = PreparedPolarScan::from_polar(angles, readings, valid).unwrap();
+    let mut result = SmResult::default();
+    Matcher::default()
+        .match_prepared_into(&mut reference, &mut sensor, &mut result)
+        .unwrap();
+    assert!(result.valid);
 }
 
 #[test]
