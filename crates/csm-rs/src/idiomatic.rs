@@ -349,6 +349,13 @@ pub struct MatchOutcome {
     pub dx_dy_sensor: Option<Matrix>,
 }
 
+impl MatchOutcome {
+    /// Whether covariance and both derivative matrices were produced.
+    pub fn has_uncertainty(&self) -> bool {
+        self.covariance.is_some() && self.dx_dy_reference.is_some() && self.dx_dy_sensor.is_some()
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct IterationSnapshot {
     pub iteration: usize,
