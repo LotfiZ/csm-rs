@@ -31,6 +31,7 @@ pub(crate) struct GpcCorrespondence {
 /// Build GPC correspondences and solve for the next ICP pose.
 ///
 /// C: `compute_next_estimate()` in `sm/csm/icp/icp_loop.c`
+#[allow(dead_code)]
 pub(crate) fn compute_next_estimate(
     params: &Params,
     laser_ref: &LaserData,
@@ -38,6 +39,17 @@ pub(crate) fn compute_next_estimate(
     x_old: [f64; 3],
 ) -> Option<[f64; 3]> {
     let mut correspondences = Vec::new();
+    compute_next_estimate_with_scratch(params, laser_ref, laser_sens, x_old, &mut correspondences)
+}
+
+pub(crate) fn compute_next_estimate_with_scratch(
+    params: &Params,
+    laser_ref: &LaserData,
+    laser_sens: &LaserData,
+    x_old: [f64; 3],
+    correspondences: &mut Vec<GpcCorrespondence>,
+) -> Option<[f64; 3]> {
+    correspondences.clear();
 
     for i in 0..laser_sens.nrays {
         if !laser_sens.valid[i] || !laser_sens.corr[i].valid {
@@ -117,11 +129,11 @@ pub(crate) fn compute_next_estimate(
         correspondences.push(correspondence);
     }
 
-    let x_new = gpc_solve(&correspondences)?;
+    let x_new = gpc_solve(correspondences)?;
     // C computes both values for its diagnostic check. Keep the same
     // observable arithmetic even though this tracer has no logging surface.
-    let _old_error = gpc_total_error(&correspondences, x_old);
-    let _new_error = gpc_total_error(&correspondences, x_new);
+    let _old_error = gpc_total_error(correspondences, x_old);
+    let _new_error = gpc_total_error(correspondences, x_new);
     Some(x_new)
 }
 
