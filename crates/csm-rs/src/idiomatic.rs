@@ -139,11 +139,17 @@ impl PreparedPolarScan {
             });
         }
         let scan = CartesianScan::new(points, valid)?;
-        let mut readings = vec![0.0; points.len()];
-        for (reading, point) in readings.iter_mut().zip(scan.points) {
+        for (reading, point) in self.data.readings.iter_mut().zip(scan.points) {
             *reading = point[0].hypot(point[1]);
         }
-        self.update(&readings, valid)
+        self.data.valid.copy_from_slice(valid);
+        self.data.cluster.fill(-1);
+        self.data.alpha.fill(f64::NAN);
+        self.data.cov_alpha.fill(f64::NAN);
+        self.data.alpha_valid.fill(false);
+        self.data.true_alpha.fill(f64::NAN);
+        self.data.corr.fill(Default::default());
+        self.data.validate()
     }
 }
 
