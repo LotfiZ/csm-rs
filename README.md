@@ -119,6 +119,10 @@ Prepared scans can be refreshed in place with `update` or
 outcome, which is suitable for metrics, logging, or a UI adapter without a
 runtime logging dependency.
 
+When covariance is not needed, `Matcher::pose_only(Params::default())`
+disables the optional covariance and derivative calculations for a smaller
+embedded runtime path.
+
 Regenerate the corpus with the C reference source checked out at
 `/path/to/csm-source`:
 
