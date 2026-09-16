@@ -91,6 +91,9 @@ cargo run --release -p csm-rs --example benchmark_baseline
 cargo run --release -p csm-rs --example benchmark_prepared
 ```
 
+For a repeatable release resource report (optimized example sizes plus the
+prepared latency benchmark), run `scripts/measure-release.sh`.
+
 The prepared benchmark reports both full covariance mode and the pose-only
 mode, allowing deployments to measure the cost of uncertainty outputs on their
 own hardware.
