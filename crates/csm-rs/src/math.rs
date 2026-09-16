@@ -391,8 +391,12 @@ pub(crate) fn distance_to_segment(a: [f64; 2], b: [f64; 2], point: [f64; 2]) -> 
 /// C: `ld_corr_hash()` in `sm/csm/laser_data.c` — reproduces C's unsigned
 /// wraparound arithmetic exactly (golden-master fidelity, grilling Q2).
 pub fn corr_hash(entries: &[Option<(i32, i32)>]) -> u32 {
+    corr_hash_iter(entries.iter().copied())
+}
+
+pub(crate) fn corr_hash_iter(entries: impl IntoIterator<Item = Option<(i32, i32)>>) -> u32 {
     let mut hash: u32 = 0;
-    for (i, entry) in entries.iter().enumerate() {
+    for (i, entry) in entries.into_iter().enumerate() {
         let str_val: u32 = match entry {
             Some((j1, j2)) => (j1 + 1000 * j2) as u32,
             None => -1i32 as u32,
