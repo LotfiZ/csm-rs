@@ -119,6 +119,12 @@ fn cartesian_validation_reports_offending_ray() {
 }
 
 #[test]
+fn cartesian_validation_rejects_undersized_scans() {
+    let err = CartesianScan::new(&[[1.0, 0.0]; 9], &[true; 9]).unwrap_err();
+    assert_eq!(err, csm_rs::LaserDataError::NraysOutOfRange);
+}
+
+#[test]
 fn prepared_match_observer_receives_outcome() {
     let angles: Vec<f64> = (0..21).map(|i| -1.0 + i as f64 * 0.1).collect();
     let readings = vec![8.0; angles.len()];
