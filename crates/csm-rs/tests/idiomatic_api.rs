@@ -71,9 +71,11 @@ fn prepared_scan_updates_without_changing_shape() {
     let readings = vec![8.0; angles.len()];
     let valid = vec![true; angles.len()];
     let mut scan = PreparedPolarScan::from_polar(angles, readings, valid).unwrap();
+    let capacity = scan.capacity();
     let updated = vec![7.5; scan.len()];
     scan.update(&updated, &vec![true; scan.len()]).unwrap();
     assert_eq!(scan.readings(), updated.as_slice());
+    assert_eq!(scan.capacity(), capacity);
 }
 
 #[test]
