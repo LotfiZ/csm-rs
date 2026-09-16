@@ -130,6 +130,8 @@ pub(crate) struct IcpScratch {
     distances: Vec<f64>,
     correspondences: Vec<GpcCorrespondence>,
     pub(crate) observer: IterationObserver,
+    pub(crate) trace_events: Vec<(usize, [f64; 3], f64, usize)>,
+    pub(crate) trace_enabled: bool,
 }
 
 type IterationObserver = Option<Box<dyn FnMut(usize, [f64; 3], f64, usize)>>;
@@ -143,6 +145,8 @@ impl IcpScratch {
             distances: Vec::with_capacity(sensor_rays),
             correspondences: Vec::with_capacity(sensor_rays),
             observer: None,
+            trace_events: Vec::new(),
+            trace_enabled: false,
         }
     }
 }
@@ -310,6 +314,9 @@ fn icp_loop(
         let error = trimmed.total_error;
         if let Some(observer) = scratch.observer.as_mut() {
             observer(iteration, x_new, error, nvalid);
+        }
+        if scratch.trace_enabled {
+            scratch.trace_events.push((iteration, x_new, error, nvalid));
         }
         last_error = error;
         last_nvalid = nvalid as i32;
