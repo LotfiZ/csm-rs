@@ -21,6 +21,9 @@
 //! Because the GPL-derived solver is part of this combined crate, distribution
 //! is currently under GPL-2.0-or-later; see the repository NOTICE.md.
 
+#![deny(unsafe_code)]
+#![doc(test(attr(deny(warnings))))]
+
 pub mod correspondence;
 pub mod covariance;
 pub mod icp;
