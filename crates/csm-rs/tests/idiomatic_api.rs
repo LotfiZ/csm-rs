@@ -201,4 +201,7 @@ fn prepared_matcher_reuses_owned_scans() {
     assert!(workspace.match_once().unwrap().valid);
     assert_eq!(workspace.reference().len(), 21);
     workspace.update_sensor(&[8.0; 21], &[true; 21]).unwrap();
+    let mut result = csm_rs::SmResult::default();
+    workspace.match_once_into(&mut result).unwrap();
+    assert!(result.valid);
 }

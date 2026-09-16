@@ -141,6 +141,17 @@ impl PreparedMatcher {
         )?;
         Ok(result.into())
     }
+
+    /// Match into caller-owned result storage for allocation-free result reuse.
+    pub fn match_once_into(&mut self, result: &mut SmResult) -> Result<(), LaserDataError> {
+        icp::sm_icp_with_scratch(
+            &self.matcher.params,
+            &mut self.reference.data,
+            &mut self.sensor.data,
+            result,
+            &mut self.scratch,
+        )
+    }
 }
 
 impl PreparedPolarScan {
