@@ -379,6 +379,19 @@ impl Matcher {
         PreparedMatcher::new(self.clone(), reference, sensor)
     }
 
+    /// Build a reusable workspace directly from ordered Cartesian frames.
+    pub fn prepare_cartesian(
+        &self,
+        reference_points: &[[f64; 2]],
+        reference_valid: &[bool],
+        sensor_points: &[[f64; 2]],
+        sensor_valid: &[bool],
+    ) -> Result<PreparedMatcher, LaserDataError> {
+        let reference = PreparedPolarScan::from_cartesian(reference_points, reference_valid)?;
+        let sensor = PreparedPolarScan::from_cartesian(sensor_points, sensor_valid)?;
+        self.prepare(reference, sensor)
+    }
+
     /// Match two borrowed polar scans without modifying caller buffers.
     pub fn match_polar(
         &self,
