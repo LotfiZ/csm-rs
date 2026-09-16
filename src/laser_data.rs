@@ -101,13 +101,6 @@ pub struct LaserData {
     /// Correspondence for each sensor ray. C: `laser_data.corr`
     pub corr: Vec<Correspondence>,
 
-    /// Reference pose metadata. C: `laser_data.true_pose`
-    pub true_pose: [f64; 3],
-    /// Odometry pose metadata. C: `laser_data.odometry`
-    pub odometry: [f64; 3],
-    /// Estimated pose metadata. C: `laser_data.estimate`
-    pub estimate: [f64; 3],
-
     /// Cartesian points in the scan frame. C: `points`
     pub points: Vec<Point2d>,
     /// Cartesian points in the world frame. C: `points_w`
@@ -161,9 +154,6 @@ impl LaserData {
             alpha_valid: vec![false; nrays],
             true_alpha: vec![f64::NAN; nrays],
             corr: vec![Correspondence::default(); nrays],
-            true_pose: [f64::NAN; 3],
-            odometry: [f64::NAN; 3],
-            estimate: [f64::NAN; 3],
             points: vec![nan_point; nrays],
             points_w: vec![nan_point; nrays],
             up_bigger: vec![0; nrays],
@@ -187,17 +177,17 @@ impl LaserData {
         theta: Vec<f64>,
         readings: Vec<f64>,
         valid: Vec<bool>,
-    ) -> Result<Self, LaserDataError> {
+    ) -> Result<Self, ScanError> {
         let nrays = theta.len();
         if readings.len() != nrays {
-            return Err(LaserDataError::InconsistentLengths {
+            return Err(ScanError::InconsistentLengths {
                 field: "readings",
                 expected: nrays,
                 actual: readings.len(),
             });
         }
         if valid.len() != nrays {
-            return Err(LaserDataError::InconsistentLengths {
+            return Err(ScanError::InconsistentLengths {
                 field: "valid",
                 expected: nrays,
                 actual: valid.len(),
@@ -420,8 +410,8 @@ impl LaserData {
     /// Structural validation of the scan, mirroring the C checks.
     ///
     /// C: `ld_valid_fields()` in `laser_data.c`
-    pub fn validate(&self) -> Result<(), LaserDataError> {
-        use LaserDataError as E;
+    pub fn validate(&self) -> Result<(), ScanError> {
+        use ScanError as E;
 
         // The C representation allocates every per-ray array together. Rust
         // callers can mutate the public vectors, so check their shape before
@@ -507,7 +497,7 @@ impl LaserData {
 ///
 /// C: `ld_valid_fields()` in `laser_data.c`
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub enum LaserDataError {
+pub enum ScanError {
     /// An in-place prepared update exceeds the workspace capacity.
     CapacityExceeded { capacity: usize, requested: usize },
     /// A per-ray field does not contain exactly `nrays` entries.
@@ -537,9 +527,11 @@ pub enum LaserDataError {
     TooFewValidRays,
     /// Two adjacent valid beams have the same bearing.
     DuplicateBearing(usize),
+    /// The requested initial pose contains a non-finite component.
+    NonFiniteGuess,
 }
 
-impl std::fmt::Display for LaserDataError {
+impl std::fmt::Display for ScanError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::CapacityExceeded {
@@ -572,11 +564,12 @@ impl std::fmt::Display for LaserDataError {
             Self::NegativeSigma(i) => write!(f, "ray #{i}: negative readings_sigma"),
             Self::TooFewValidRays => write!(f, "fewer than 10% valid rays"),
             Self::DuplicateBearing(i) => write!(f, "ray #{i}: duplicate bearing"),
+            Self::NonFiniteGuess => write!(f, "initial pose contains a non-finite value"),
         }
     }
 }
 
-impl std::error::Error for LaserDataError {}
+impl std::error::Error for ScanError {}
 
 /// Weighted least-squares orientation filter. Returns `(alpha, cov0_alpha)`;
 /// `alpha` is NaN when the system is singular.
@@ -660,7 +653,7 @@ mod tests {
         let ld = LaserData::new(5, -1.0, 1.0);
         assert!(matches!(
             ld.validate(),
-            Err(LaserDataError::NraysOutOfRange)
+            Err(ScanError::NraysOutOfRange)
         ));
     }
 
@@ -672,7 +665,7 @@ mod tests {
             ld.valid[i] = true;
             ld.readings[i] = 5.0;
         }
-        assert!(matches!(ld.validate(), Err(LaserDataError::FovOutOfRange)));
+        assert!(matches!(ld.validate(), Err(ScanError::FovOutOfRange)));
     }
 
     #[test]
@@ -682,7 +675,7 @@ mod tests {
         ld.min_theta = ld.theta[0] + 1e-6;
         assert!(matches!(
             ld.validate(),
-            Err(LaserDataError::ThetaBoundsMismatch)
+            Err(ScanError::ThetaBoundsMismatch)
         ));
     }
 
@@ -692,7 +685,7 @@ mod tests {
         ld.readings[42] = f64::NAN;
         assert!(matches!(
             ld.validate(),
-            Err(LaserDataError::BadValidRay(42))
+            Err(ScanError::BadValidRay(42))
         ));
     }
 
@@ -701,7 +694,7 @@ mod tests {
         // C: valid readings must be in (0, 100)
         let mut ld = valid_scan();
         ld.readings[7] = 150.0;
-        assert!(matches!(ld.validate(), Err(LaserDataError::BadValidRay(7))));
+        assert!(matches!(ld.validate(), Err(ScanError::BadValidRay(7))));
     }
 
     #[test]
@@ -709,7 +702,7 @@ mod tests {
         let mut ld = valid_scan();
         ld.valid[3] = false;
         ld.cluster[3] = 2;
-        assert!(matches!(ld.validate(), Err(LaserDataError::BadCluster(3))));
+        assert!(matches!(ld.validate(), Err(ScanError::BadCluster(3))));
     }
 
     #[test]
@@ -718,7 +711,7 @@ mod tests {
         ld.readings_sigma[9] = -1.0;
         assert!(matches!(
             ld.validate(),
-            Err(LaserDataError::NegativeSigma(9))
+            Err(ScanError::NegativeSigma(9))
         ));
     }
 
@@ -933,7 +926,7 @@ mod tests {
         }
         assert!(matches!(
             ld.validate(),
-            Err(LaserDataError::TooFewValidRays)
+            Err(ScanError::TooFewValidRays)
         ));
     }
 
@@ -950,6 +943,5 @@ mod tests {
         assert!(ld.cluster.iter().all(|&c| c == -1));
         assert!(ld.corr.iter().all(|c| !c.valid && c.j1 == -1 && c.j2 == -1));
         assert!(ld.points.iter().all(|p| p.p[0].is_nan() && p.rho.is_nan()));
-        assert!(ld.odometry.iter().all(|v| v.is_nan()));
     }
 }

@@ -16,8 +16,8 @@ fn main() {
     let estimated_workspace_bytes = (reference.capacity() + sensor.capacity())
         * (std::mem::size_of::<f64>() + std::mem::size_of::<bool>());
     for (label, matcher) in [
-        ("full", Matcher::new(Params::default())),
-        ("pose_only", Matcher::pose_only(Params::default())),
+        ("full", Matcher::new(Params::default()).unwrap()),
+        ("pose_only", Matcher::default_pose_only()),
     ] {
         for _ in 0..3 {
             black_box(matcher.match_prepared(&mut reference, &mut sensor).unwrap());

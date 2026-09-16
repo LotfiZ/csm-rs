@@ -1,19 +1,54 @@
 //! # csm-rs
 //!
-//! Rust port of the **Canonical Scan Matcher** (Andrea Censi, 2007):
-//! point-to-line ICP with smart correspondence search, outlier rejection,
-//! and a closed-form estimate of the matching covariance.
+//! A Rust implementation of the **Canonical Scan Matcher** (Andrea Censi,
+//! 2007): point-to-line ICP with smart correspondence search, outlier
+//! rejection, restart handling, and an optional closed-form estimate of the
+//! matching covariance.
 //!
-//! This crate is a *faithful* port of the C reference implementation
-//! (<https://github.com/AndreaCensi/csm>, branch `master`, GSL flavor).
-//! Fidelity binds the arithmetic; the API surface is idiomatic Rust.
-//! Each module documents the C files it ports.
+//! The supported interface is organized around four ideas:
 //!
-//! ## Port scope (grilling Q1)
+//! - **Scans**: [`PolarScan`] (ordered polar returns) and [`CartesianScan`]
+//!   (ordered points).
+//! - **Configuration**: [`Params`] and its validated sub-configuration.
+//! - **Matching**: [`Matcher`], plus [`PreparedMatcher`] for reusable storage.
+//! - **Results**: [`MatchOutcome`], with explicit [`TerminationReason`].
 //!
-//! Ported: `sm_icp` — ICP/PlICP + covariance, including alpha test,
-//! visibility test, ML/sigma weights, and restart logic.
-//! Skipped: GPM, HSM, MbICP (unfinished upstream), Cairo drawing, CLI apps.
+//! ## Coordinate contract
+//!
+//! Inputs use **metres and radians**. A scan is centered on its own sensor
+//! origin. Rays are **ordered by bearing**: a polar ray at angle `theta` with
+//! reading `r` is the sensor-frame point `[r cos(theta), r sin(theta)]`, and a
+//! Cartesian ray is its own `[x, y]`. The matcher relies on that ordering for
+//! its neighbourhood search and never sorts or drops points. Unordered
+//! point-cloud registration is out of scope.
+//!
+//! The match result is the rigid transform that maps **sensor-scan
+//! coordinates into reference-scan coordinates**: `R(theta) * p + (x, y)`,
+//! with `theta` counter-clockwise in the reference frame. [`Pose`] documents
+//! the composition convention.
+//!
+//! ## Quick start
+//!
+//! ```
+//! use csm_rs::{Matcher, Params, PolarScan};
+//!
+//! let angles: Vec<f64> = (0..21).map(|i| -1.0 + i as f64 * 0.1).collect();
+//! let readings: Vec<f64> = angles.iter().map(|a| 8.0 + 0.2 * a.cos()).collect();
+//! let valid = vec![true; angles.len()];
+//! let reference = PolarScan::new(&angles, &readings, &valid)?;
+//! let sensor = PolarScan::new(&angles, &readings, &valid)?;
+//!
+//! let matcher = Matcher::new(Params::default())?;
+//! let outcome = matcher.match_polar(reference, sensor)?;
+//! assert!(outcome.valid);
+//! # Ok::<(), Box<dyn std::error::Error>>(())
+//! ```
+//!
+//! ## Errors and outcomes
+//!
+//! Malformed input returns a [`ScanError`]. A well-formed pair that cannot be
+//! matched is a normal [`MatchOutcome`] with `valid == false`; inspect
+//! [`MatchOutcome::termination`] for the reason.
 //!
 //! ## Licensing
 //!
@@ -24,38 +59,38 @@
 #![deny(unsafe_code)]
 #![doc(test(attr(deny(warnings))))]
 
-pub mod correspondence;
-pub mod covariance;
-pub mod icp;
-pub mod idiomatic;
-pub mod laser_data;
-pub mod math;
-pub mod params;
-pub mod result;
-pub mod solver;
+#[cfg(test)]
+mod golden_tests;
 
-pub use idiomatic::{
-    CartesianScan, CovarianceStatus, IterationSnapshot, MatchOutcome, MatchStatus, Matcher,
-    PolarScan, PreparedMatcher, PreparedPolarScan, TerminationReason,
-};
-pub use laser_data::{LaserData, LaserDataError};
-pub use params::{Params, ParamsError};
-pub use result::SmResult;
+mod correspondence;
+mod covariance;
+mod icp;
+mod laser_data;
+mod math;
+mod params;
+mod pose;
+mod result;
+mod solver;
 
-/// Run point-to-line ICP scan matching.
-///
-/// The scans are mutable because CSM fills their cartesian, world-coordinate,
-/// and correspondence fields in place. A failed match is reported through
-/// `result.valid`; malformed scan data is returned as [`LaserDataError`].
-/// This keeps malformed input separate from a valid scan pair that simply does
-/// not converge.
-///
-/// C: `sm/csm/icp/icp.c:sm_icp()`
-pub fn sm_icp(
-    params: &Params,
-    laser_ref: &mut LaserData,
-    laser_sens: &mut LaserData,
-    result: &mut SmResult,
-) -> Result<(), LaserDataError> {
-    icp::sm_icp(params, laser_ref, laser_sens, result)
+pub mod matching;
+pub mod scan;
+
+/// Validated matcher configuration.
+pub mod config {
+    pub use crate::params::{
+        CorrespondenceParams, CorrespondenceSearch, CorrectionLimits, DistanceMetric,
+        OutlierParams, Params, ParamsError, ReadingBounds, RestartParams, StoppingCriteria,
+        WeightParams,
+    };
 }
+
+pub use config::{
+    CorrespondenceParams, CorrespondenceSearch, CorrectionLimits, DistanceMetric, OutlierParams,
+    Params, ParamsError, ReadingBounds, RestartParams, StoppingCriteria, WeightParams,
+};
+pub use matching::{
+    CovarianceStatus, IterationSnapshot, MatchOutcome, MatchStatus, Matcher, PreparedMatcher,
+    PreparedPolarScan, TerminationReason,
+};
+pub use pose::Pose;
+pub use scan::{CartesianScan, PolarScan, ScanError};

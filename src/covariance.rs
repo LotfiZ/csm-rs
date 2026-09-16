@@ -30,6 +30,7 @@ pub(crate) struct ExactCovariance {
 /// want the scan-only information matrix alongside ICP's matching covariance.
 ///
 /// C: `sm/csm/laser_data_fisher.c:ld_fisher0()`
+#[allow(dead_code)] // Exposed by the optional-uncertainty public API (see epic #35).
 pub fn fisher0(laser: &LaserData) -> Mat3 {
     let mut fim = [[0.0; 3]; 3];
     for i in 0..laser.nrays {
