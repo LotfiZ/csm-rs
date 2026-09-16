@@ -531,6 +531,8 @@ pub enum LaserDataError {
     NegativeSigma(usize),
     /// C: at least 10% of rays must be valid
     TooFewValidRays,
+    /// Two adjacent valid beams have the same bearing.
+    DuplicateBearing(usize),
 }
 
 impl std::fmt::Display for LaserDataError {
@@ -556,6 +558,7 @@ impl std::fmt::Display for LaserDataError {
             Self::BadCluster(i) => write!(f, "ray #{i}: bad cluster value"),
             Self::NegativeSigma(i) => write!(f, "ray #{i}: negative readings_sigma"),
             Self::TooFewValidRays => write!(f, "fewer than 10% valid rays"),
+            Self::DuplicateBearing(i) => write!(f, "ray #{i}: duplicate bearing"),
         }
     }
 }

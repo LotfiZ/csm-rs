@@ -66,6 +66,11 @@ impl<'a> CartesianScan<'a> {
         if angles.iter().any(|angle| !angle.is_finite()) {
             return Err(LaserDataError::BadValidRay(0));
         }
+        for i in 1..angles.len() {
+            if valid[i] && valid[i - 1] && angles[i] == angles[i - 1] {
+                return Err(LaserDataError::DuplicateBearing(i));
+            }
+        }
         scan.angles = Some(angles);
         Ok(scan)
     }
