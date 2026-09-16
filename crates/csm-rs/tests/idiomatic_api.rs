@@ -1,4 +1,4 @@
-use csm_rs::{MatchOutcome, Matcher, Params, PolarScan, PreparedPolarScan};
+use csm_rs::{CartesianScan, MatchOutcome, Matcher, Params, PolarScan, PreparedPolarScan};
 
 #[test]
 fn borrowed_polar_match_preserves_inputs() {
@@ -55,4 +55,22 @@ fn borrowed_polar_rejects_mismatched_lengths() {
             ..
         }
     ));
+}
+
+#[test]
+fn cartesian_match_preserves_points() {
+    let points: Vec<[f64; 2]> = (0..21)
+        .map(|i| {
+            let a = -1.0 + i as f64 * 0.1;
+            [8.0 * a.cos(), 8.0 * a.sin()]
+        })
+        .collect();
+    let valid = vec![true; points.len()];
+    let before = points.clone();
+    let scan = CartesianScan::new(&points, &valid).unwrap();
+    let outcome = Matcher::new(Params::default())
+        .match_cartesian(scan, scan)
+        .unwrap();
+    assert!(outcome.valid);
+    assert_eq!(points, before);
 }
