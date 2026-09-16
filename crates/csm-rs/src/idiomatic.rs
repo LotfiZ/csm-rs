@@ -38,7 +38,7 @@ impl<'a> CartesianScan<'a> {
         {
             return Err(LaserDataError::BadValidRay(index));
         }
-        if points.len() < 2 {
+        if points.len() < 10 {
             return Err(LaserDataError::NraysOutOfRange);
         }
         Ok(Self { points, valid })
