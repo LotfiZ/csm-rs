@@ -271,7 +271,15 @@ impl Params {
             && self.correction_limits.max_angular_deg.is_finite()
             && self.correction_limits.max_linear.is_finite()
             && self.stopping.epsilon_xy.is_finite()
-            && self.stopping.epsilon_theta.is_finite();
+            && self.stopping.epsilon_theta.is_finite()
+            && self.correspondence.max_dist.is_finite()
+            && self.correspondence.sigma.is_finite()
+            && self.outliers.max_perc.is_finite()
+            && self.outliers.adaptive_order.is_finite()
+            && self.outliers.adaptive_mult.is_finite()
+            && self.restart.threshold_mean_error.is_finite()
+            && self.restart.dt.is_finite()
+            && self.restart.dtheta.is_finite();
         if !finite {
             return Err(ParamsError::NonFinite);
         }
@@ -280,6 +288,17 @@ impl Params {
             || self.correction_limits.max_linear < 0.0
             || self.stopping.epsilon_xy < 0.0
             || self.stopping.epsilon_theta < 0.0
+        {
+            return Err(ParamsError::InvalidRange);
+        }
+        if self.correspondence.max_dist <= 0.0
+            || self.correspondence.sigma <= 0.0
+            || !(0.0..=1.0).contains(&self.outliers.max_perc)
+            || self.outliers.adaptive_order < 0.0
+            || self.outliers.adaptive_mult <= 0.0
+            || self.restart.threshold_mean_error < 0.0
+            || self.restart.dt < 0.0
+            || self.restart.dtheta < 0.0
         {
             return Err(ParamsError::InvalidRange);
         }
