@@ -89,6 +89,33 @@ impl PreparedPolarScan {
     pub fn valid(&self) -> &[bool] {
         &self.data.valid
     }
+
+    /// Refresh readings in place while retaining all allocated storage.
+    pub fn update(&mut self, readings: &[f64], valid: &[bool]) -> Result<(), LaserDataError> {
+        if readings.len() != self.data.nrays {
+            return Err(LaserDataError::InconsistentLengths {
+                field: "readings",
+                expected: self.data.nrays,
+                actual: readings.len(),
+            });
+        }
+        if valid.len() != self.data.nrays {
+            return Err(LaserDataError::InconsistentLengths {
+                field: "valid",
+                expected: self.data.nrays,
+                actual: valid.len(),
+            });
+        }
+        self.data.readings.copy_from_slice(readings);
+        self.data.valid.copy_from_slice(valid);
+        self.data.cluster.fill(-1);
+        self.data.alpha.fill(f64::NAN);
+        self.data.cov_alpha.fill(f64::NAN);
+        self.data.alpha_valid.fill(false);
+        self.data.true_alpha.fill(f64::NAN);
+        self.data.corr.fill(Default::default());
+        self.data.validate()
+    }
 }
 
 impl<'a> PolarScan<'a> {
