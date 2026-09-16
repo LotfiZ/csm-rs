@@ -274,6 +274,8 @@ impl Params {
             && self.stopping.epsilon_theta.is_finite()
             && self.correspondence.max_dist.is_finite()
             && self.correspondence.sigma.is_finite()
+            && self.correspondence.alpha_test_threshold_deg.is_finite()
+            && self.correspondence.clustering_threshold.is_finite()
             && self.outliers.max_perc.is_finite()
             && self.outliers.adaptive_order.is_finite()
             && self.outliers.adaptive_mult.is_finite()
@@ -294,6 +296,9 @@ impl Params {
         }
         if self.correspondence.max_dist <= 0.0
             || self.correspondence.sigma <= 0.0
+            || self.correspondence.alpha_test_threshold_deg < 0.0
+            || self.correspondence.clustering_threshold < 0.0
+            || self.correspondence.orientation_neighbourhood < 1
             || !(0.0..=1.0).contains(&self.outliers.max_perc)
             || self.outliers.adaptive_order < 0.0
             || self.outliers.adaptive_mult <= 0.0
