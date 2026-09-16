@@ -136,13 +136,20 @@ pub(crate) fn gpc_solve(correspondences: &[GpcCorrespondence]) -> Option<[f64; 3
     let m_d = Mat2::new([[big_m[2][2], big_m[2][3]], [big_m[3][2], big_m[3][3]]]);
 
     let m_ai = m_a.inv()?;
-    let m_s = mat2_sub(&m_d, &m_b.transpose().mul(&m_ai.mul(&m_b)));
+    // Keep the multiplication grouping used by GPC: inv(A)·B is formed
+    // first, then Bᵀ·(inv(A)·B). The weighted path is sensitive to changing
+    // this floating-point evaluation order.
+    let m_ai_b = m_ai.mul(&m_b);
+    let m_b_transpose_ai_b = m_b.transpose().mul(&m_ai_b);
+    let m_s = mat2_sub(&m_d, &m_b_transpose_ai_b);
     let m_s_det = mat2_det(&m_s);
     let m_sa = mat2_scale(&m_s.inv()?, m_s_det);
 
     let g1 = [g[0], g[1]];
     let g2 = [g[2], g[3]];
-    let m1t = row_mul_mat2(&g1, &m_ai.mul(&m_b));
+    // C: g1ᵀ·inv(A), followed by ·B (rather than g1ᵀ·(inv(A)·B)).
+    let g1t_m_ai = row_mul_mat2(&g1, &m_ai);
+    let m1t = row_mul_mat2(&g1t_m_ai, &m_b);
     let m2t = row_mul_mat2(&m1t, &m_sa);
     let m3t = row_mul_mat2(&g2, &m_sa);
 

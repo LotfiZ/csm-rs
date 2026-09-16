@@ -24,6 +24,10 @@ struct FixtureScan {
     min_theta: f64,
     max_theta: f64,
     readings: Vec<f64>,
+    #[serde(default)]
+    readings_sigma: Vec<Option<f64>>,
+    #[serde(default)]
+    true_alpha: Vec<Option<f64>>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -66,6 +70,7 @@ struct ExpectedResult {
     x: [f64; 3],
     error: f64,
     iterations: i32,
+    correspondence_hash: u32,
     nvalid: i32,
 }
 
@@ -79,6 +84,16 @@ fn build_scan(scan: &FixtureScan) -> LaserData {
     for (i, &reading) in scan.readings.iter().enumerate() {
         result.valid[i] = true;
         result.readings[i] = reading;
+    }
+    for (i, sigma) in scan.readings_sigma.iter().enumerate() {
+        if let Some(sigma) = sigma {
+            result.readings_sigma[i] = *sigma;
+        }
+    }
+    for (i, alpha) in scan.true_alpha.iter().enumerate() {
+        if let Some(alpha) = alpha {
+            result.true_alpha[i] = *alpha;
+        }
     }
     result
 }
@@ -148,7 +163,7 @@ fn fixture_cases_match_c_reference_and_each_strategy() {
 
     for case in &fixture.cases {
         let params = build_params(&case.params);
-        let (result, _) = run_case(&params, case);
+        let (result, laser_sens) = run_case(&params, case);
 
         assert_eq!(result.valid, case.expected.valid, "case {}", case.name);
         assert_eq!(
@@ -170,6 +185,21 @@ fn fixture_cases_match_c_reference_and_each_strategy() {
                 "case {}: {actual} != {expected}",
                 case.name
             );
+        }
+
+        let final_keys = correspondence_keys(&laser_sens);
+        assert_eq!(
+            corr_hash(&final_keys),
+            case.expected.correspondence_hash,
+            "case {}: final correspondence hash",
+            case.name
+        );
+
+        // C's tricks search intentionally omits the optional alpha test. Keep
+        // the strategy-equivalence assertion for the common path and let an
+        // alpha-enabled fixture validate the configured C path directly.
+        if params.correspondence.do_alpha_test {
+            continue;
         }
 
         // Run both strategies through the public seam and compare the final
@@ -289,4 +319,78 @@ fn restart_fixture_requires_the_restart_shell() {
     assert!(with_restart.error < without_restart.error);
     assert!(with_restart.x[0].abs() < 0.02);
     assert!(without_restart.x[0].abs() > 0.01);
+}
+
+#[test]
+fn alpha_fixtures_cover_default_visibility_and_rejection_paths() {
+    let fixture = read_fixture();
+    let default_case = fixture
+        .cases
+        .iter()
+        .find(|case| case.name == "alpha_visibility_tricks")
+        .expect("default alpha/visibility fixture case");
+    assert_eq!(default_case.params.use_corr_tricks, 1);
+    assert_eq!(default_case.params.do_alpha_test, 1);
+    assert_eq!(default_case.params.do_visibility_test, 1);
+
+    let rejection_case = fixture
+        .cases
+        .iter()
+        .find(|case| case.name == "alpha_rejection")
+        .expect("alpha rejection fixture case");
+    assert_eq!(rejection_case.params.use_corr_tricks, 0);
+    assert_eq!(rejection_case.params.do_alpha_test, 1);
+    assert_eq!(rejection_case.params.max_angular_correction_deg, 0.0);
+    let alpha_params = build_params(&rejection_case.params);
+    let (with_alpha, _) = run_case(&alpha_params, rejection_case);
+    let mut without_alpha_params = alpha_params;
+    without_alpha_params.correspondence.do_alpha_test = false;
+    let (without_alpha, _) = run_case(&without_alpha_params, rejection_case);
+    assert!(
+        without_alpha.nvalid > with_alpha.nvalid,
+        "alpha rejection should remove correspondences"
+    );
+}
+
+#[test]
+fn weighting_fixtures_cover_each_branch_and_computed_alpha_fallback() {
+    let fixture = read_fixture();
+    for (name, ml, sigma) in [
+        ("ml_weights", true, false),
+        ("sigma_weights", false, true),
+        ("computed_alpha_weights", true, false),
+    ] {
+        let case = fixture
+            .cases
+            .iter()
+            .find(|case| case.name == name)
+            .unwrap_or_else(|| panic!("{name} fixture case"));
+        assert_eq!(case.params.use_ml_weights != 0, ml, "case {name}");
+        assert_eq!(case.params.use_sigma_weights != 0, sigma, "case {name}");
+        if name == "ml_weights" {
+            assert!(case.laser_ref.true_alpha.iter().all(Option::is_some));
+        }
+        if name == "sigma_weights" {
+            assert!(case.laser_sens.readings_sigma.iter().any(Option::is_none));
+        }
+        if name == "computed_alpha_weights" {
+            assert!(case.laser_ref.true_alpha.is_empty());
+            assert_eq!(case.params.do_alpha_test, 1);
+        }
+
+        let weighted_params = build_params(&case.params);
+        let (weighted, _) = run_case(&weighted_params, case);
+        let mut unweighted_params = weighted_params;
+        unweighted_params.weights.ml = false;
+        unweighted_params.weights.sigma = false;
+        let (unweighted, _) = run_case(&unweighted_params, case);
+        assert!(
+            weighted
+                .x
+                .iter()
+                .zip(unweighted.x)
+                .any(|(weighted, unweighted)| (weighted - unweighted).abs() > 1e-6),
+            "weight fields should affect the solved pose for {name}"
+        );
+    }
 }

@@ -2,6 +2,7 @@
 //!
 //! C: `sm/csm/laser_data.h`, `sm/csm/laser_data.c`, `sm/csm/laser_data_inline.h`,
 //!     `sm/csm/laser_data_bbox.c`, `sm/csm/clustering.c`, `sm/csm/orientation.c`,
+//!     visibility in `sm/csm/icp/icp_outliers.c`,
 //!     jump tables in `sm/csm/icp/icp_corr_tricks.c:ld_create_jump_tables()`
 //!
 //! Ports: polar→cartesian conversion, world-coordinate transform, jump tables
@@ -187,6 +188,31 @@ impl LaserData {
             let (x, y) = (self.points_w[i].p[0], self.points_w[i].p[1]);
             self.points_w[i].rho = (x * x + y * y).sqrt();
             self.points_w[i].phi = y.atan2(x);
+        }
+    }
+
+    /// Invalidate points hidden from a viewpoint when their bearing reverses
+    /// along the scan order.
+    ///
+    /// C: `visibilityTest()` in `sm/csm/icp/icp_outliers.c`. The C routine
+    /// uses only the viewpoint translation; the pose angle is intentionally
+    /// ignored.
+    pub fn visibility_test(&mut self, viewpoint: &[f64; 3]) {
+        let mut theta_from_viewpoint = vec![f64::NAN; self.nrays];
+        for (i, angle) in theta_from_viewpoint.iter_mut().enumerate() {
+            if !self.valid[i] {
+                continue;
+            }
+            *angle = (viewpoint[1] - self.points[i].p[1]).atan2(viewpoint[0] - self.points[i].p[0]);
+        }
+
+        for i in 1..self.nrays {
+            if !self.valid[i] || !self.valid[i - 1] {
+                continue;
+            }
+            if theta_from_viewpoint[i] < theta_from_viewpoint[i - 1] {
+                self.valid[i] = false;
+            }
         }
     }
 
@@ -610,6 +636,20 @@ mod tests {
         assert!((ld.points_w[0].phi - 3.0f64.atan2(1.0)).abs() < 1e-12);
         // invalid ray: p untouched (stays NaN from alloc)
         assert!(ld.points_w[5].p[0].is_nan());
+    }
+
+    #[test]
+    fn visibility_test_invalidates_bearing_reversals() {
+        let mut ld = LaserData::new(10, -1.0, 1.0);
+        for i in 0..ld.nrays {
+            ld.valid[i] = true;
+            let angle = if i == 5 { -1.0 } else { -1.0 + 0.2 * i as f64 };
+            ld.points[i].p = [-angle.cos(), -angle.sin()];
+        }
+
+        ld.visibility_test(&[0.0, 0.0, 7.0]);
+
+        assert!((0..10).filter(|&i| !ld.valid[i]).eq([5]));
     }
 
     #[test]

@@ -11,7 +11,7 @@
 
 use crate::correspondence::{find_correspondences, kill_outliers_double, kill_outliers_trim};
 use crate::laser_data::LaserData;
-use crate::math::{corr_hash, pose_diff};
+use crate::math::{corr_hash, ominus, pose_diff};
 use crate::params::DistanceMetric;
 use crate::params::Params;
 use crate::result::SmResult;
@@ -50,9 +50,8 @@ pub(crate) fn sm_icp(
     laser_ref.compute_cartesian();
     laser_sens.compute_cartesian();
 
-    // These fields are already part of the scan model. Computing them here
-    // keeps the alpha-gated correspondence path usable while its other
-    // optional features remain outside this tracer ticket.
+    // C computes alpha before visibility invalidates rays. Keep that order so
+    // the derived fields on surviving rays have the same values as CSM.
     if params.correspondence.do_alpha_test {
         laser_ref.simple_clustering(params.correspondence.clustering_threshold);
         laser_ref.compute_orientation(
@@ -64,6 +63,14 @@ pub(crate) fn sm_icp(
             params.correspondence.orientation_neighbourhood,
             params.correspondence.sigma,
         );
+    }
+
+    if params.correspondence.do_visibility_test {
+        // C: `visibilityTest(laser_ref, x_old)` and
+        // `visibilityTest(laser_sens, ominus(x_old))` in `icp.c`.
+        laser_ref.visibility_test(&params.first_guess);
+        let sensor_viewpoint = ominus(params.first_guess);
+        laser_sens.visibility_test(&sensor_viewpoint);
     }
 
     let outcome = icp_loop_with_restart(params, laser_ref, laser_sens);

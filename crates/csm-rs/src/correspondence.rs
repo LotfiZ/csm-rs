@@ -10,9 +10,8 @@
 //! with `debug_verify_tricks`.
 //!
 //! The upstream tricks routine does not call `compatible()` for its optional
-//! alpha filter. That C asymmetry is preserved here; the equivalence seam
-//! therefore applies to the default alpha-disabled search and will be
-//! revisited with the later alpha-feature ticket.
+//! alpha filter. That C asymmetry is preserved here; alpha-enabled fixtures
+//! therefore use the naive strategy at the public golden seam.
 
 use crate::laser_data::{CorrespondenceType, LaserData};
 use crate::math::{angle_diff, corr_hash, distance_squared, distance_to_segment, norm};
@@ -68,7 +67,7 @@ pub(crate) fn find_correspondences(
 ///
 /// C: `sm/csm/icp/icp_corr_tricks.c:find_correspondences_tricks()`
 /// The C routine intentionally does not apply `compatible()`; preserve that
-/// behavior until the alpha-feature ticket extends both strategies together.
+/// behavior even when the optional alpha filter is enabled.
 fn find_correspondences_tricks(params: &Params, laser_ref: &LaserData, laser_sens: &mut LaserData) {
     let c1 = laser_ref.nrays as f64 / (laser_ref.max_theta - laser_ref.min_theta);
     let max_correspondence_dist2 = params.correspondence.max_dist * params.correspondence.max_dist;
@@ -625,6 +624,26 @@ mod tests {
             smooth_scan(|i| i % 37 != 0),
             [0.04, -0.03, 0.008],
         );
+    }
+
+    #[test]
+    fn alpha_compatibility_rejects_large_orientation_error() {
+        let mut params = Params::default();
+        params.correspondence.do_alpha_test = true;
+        params.correspondence.alpha_test_threshold_deg = 5.0;
+        params.correction_limits.max_angular_deg = 0.0;
+
+        let mut laser_ref = LaserData::new(12, -1.0, 1.0);
+        let mut laser_sens = LaserData::new(12, -1.0, 1.0);
+        laser_ref.alpha_valid[4] = true;
+        laser_ref.alpha[4] = 0.0;
+        laser_sens.alpha_valid[3] = true;
+        laser_sens.alpha[3] = 0.5;
+
+        assert!(!compatible(&params, 3, 4, &laser_ref, &laser_sens));
+
+        laser_sens.alpha_valid[3] = false;
+        assert!(compatible(&params, 3, 4, &laser_ref, &laser_sens));
     }
 
     fn outlier_fixture() -> (LaserData, LaserData) {
