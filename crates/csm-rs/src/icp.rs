@@ -123,14 +123,16 @@ struct IcpOutcome {
 }
 
 /// Reusable buffers for the correspondence and outlier stages of ICP.
-#[derive(Debug)]
 pub(crate) struct IcpScratch {
     hashes: Vec<u32>,
     nearest_distances: Vec<f64>,
     distances_by_sensor: Vec<f64>,
     distances: Vec<f64>,
     correspondences: Vec<GpcCorrespondence>,
+    pub(crate) observer: IterationObserver,
 }
+
+type IterationObserver = Option<Box<dyn FnMut(usize, [f64; 3], f64, usize)>>;
 
 impl IcpScratch {
     pub(crate) fn new(reference_rays: usize, sensor_rays: usize, max_iterations: usize) -> Self {
@@ -140,6 +142,7 @@ impl IcpScratch {
             distances_by_sensor: vec![0.0; sensor_rays],
             distances: Vec::with_capacity(sensor_rays),
             correspondences: Vec::with_capacity(sensor_rays),
+            observer: None,
         }
     }
 }
@@ -305,6 +308,9 @@ fn icp_loop(
         x_new = next;
 
         let error = trimmed.total_error;
+        if let Some(observer) = scratch.observer.as_mut() {
+            observer(iteration, x_new, error, nvalid);
+        }
         last_error = error;
         last_nvalid = nvalid as i32;
         if error < best_error {
