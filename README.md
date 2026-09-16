@@ -77,9 +77,11 @@ and their reading can be `NaN`.
 Inputs use **metres and radians**. Each scan is centered on its own sensor
 origin, and rays are **ordered by bearing**: a polar ray at `theta` with
 reading `r` is the sensor-frame point `[r cos(theta), r sin(theta)]`, and a
-Cartesian ray is its own `[x, y]`. The matcher relies on that ordering and
-never sorts or drops points; unordered point-cloud registration is out of
-scope. The result is the rigid transform mapping sensor-scan coordinates into
+Cartesian ray is its own `[x, y]`. Cartesian bearings are derived as
+`atan2(y, x)` unless supplied with `CartesianScan::with_angles` (for example a
+differently mounted scanner). The matcher relies on that ordering and never
+sorts or drops points; unordered point-cloud registration is out of scope. The
+result is the rigid transform mapping sensor-scan coordinates into
 reference-scan coordinates: `R(theta) * p + (x, y)` with counter-clockwise
 `theta`. [`Pose`] documents composition.
 

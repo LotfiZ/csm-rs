@@ -9,6 +9,9 @@
   modules are private again ([#37](https://github.com/LotfiZ/csm-rs/issues/37)).
 - Added `Pose` with an identity convenience and explicit `match_*_from`
   initial-guess matching.
+- Support ordered Cartesian scans through the same matching and configuration
+  contracts, with supplied or derived (`atan2`) bearings, preserved missing
+  returns, and no silent sorting ([#38](https://github.com/LotfiZ/csm-rs/issues/38)).
 - Documented the coordinate contract: metres, radians, scan ordering, sensor
   origin, and the sensor-to-reference transform composition.
 - Retained `PreparedPolarScan`/`PreparedMatcher` reusable storage and optional

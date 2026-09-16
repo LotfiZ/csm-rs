@@ -34,8 +34,7 @@ impl PreparedPolarScan {
 
     pub fn from_cartesian(points: &[[f64; 2]], valid: &[bool]) -> Result<Self, ScanError> {
         let scan = CartesianScan::new(points, valid)?;
-        let angles = scan.points().iter().map(|p| p[1].atan2(p[0])).collect();
-        let readings = scan.points().iter().map(|p| p[0].hypot(p[1])).collect();
+        let (angles, readings) = scan.to_polar_parts();
         Self::from_polar(angles, readings, valid.to_vec())
     }
 
@@ -45,8 +44,8 @@ impl PreparedPolarScan {
         valid: &[bool],
     ) -> Result<Self, ScanError> {
         let scan = CartesianScan::with_angles(points, angles, valid)?;
-        let readings = scan.points().iter().map(|p| p[0].hypot(p[1])).collect();
-        Self::from_polar(angles.to_vec(), readings, valid.to_vec())
+        let (angles, readings) = scan.to_polar_parts();
+        Self::from_polar(angles, readings, valid.to_vec())
     }
 
     pub fn len(&self) -> usize {
@@ -559,18 +558,6 @@ impl Matcher {
 ///
 /// Explicit bearings are preserved; otherwise the bearing is `atan2(y, x)`.
 fn cartesian_to_laser(scan: CartesianScan<'_>) -> Result<LaserData, ScanError> {
-    let derive_angles;
-    let angles: &[f64] = match scan.angles() {
-        Some(angles) => angles,
-        None => {
-            derive_angles = scan
-                .points()
-                .iter()
-                .map(|p| p[1].atan2(p[0]))
-                .collect::<Vec<_>>();
-            &derive_angles
-        }
-    };
-    let readings = scan.points().iter().map(|p| p[0].hypot(p[1])).collect();
-    LaserData::from_polar(angles.to_vec(), readings, scan.valid().to_vec())
+    let (angles, readings) = scan.to_polar_parts();
+    LaserData::from_polar(angles, readings, scan.valid().to_vec())
 }

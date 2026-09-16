@@ -527,6 +527,8 @@ pub enum ScanError {
     TooFewValidRays,
     /// Two adjacent valid beams have the same bearing.
     DuplicateBearing(usize),
+    /// A valid Cartesian point has a non-finite supplied bearing.
+    NonFiniteBearing(usize),
     /// The requested initial pose contains a non-finite component.
     NonFiniteGuess,
 }
@@ -564,6 +566,7 @@ impl std::fmt::Display for ScanError {
             Self::NegativeSigma(i) => write!(f, "ray #{i}: negative readings_sigma"),
             Self::TooFewValidRays => write!(f, "fewer than 10% valid rays"),
             Self::DuplicateBearing(i) => write!(f, "ray #{i}: duplicate bearing"),
+            Self::NonFiniteBearing(i) => write!(f, "ray #{i}: non-finite bearing on a valid point"),
             Self::NonFiniteGuess => write!(f, "initial pose contains a non-finite value"),
         }
     }
