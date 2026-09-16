@@ -111,6 +111,14 @@ fn prepared_cartesian_scan_updates() {
 }
 
 #[test]
+fn cartesian_validation_reports_offending_ray() {
+    let mut points = vec![[1.0, 0.0]; 21];
+    points[7][0] = f64::NAN;
+    let err = CartesianScan::new(&points, &vec![true; 21]).unwrap_err();
+    assert_eq!(err, csm_rs::LaserDataError::BadValidRay(7));
+}
+
+#[test]
 fn borrowed_polar_rejects_mismatched_lengths() {
     let err = PolarScan::new(&[0.0; 10], &[1.0; 9], &[true; 10]).unwrap_err();
     assert!(matches!(
