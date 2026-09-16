@@ -122,6 +122,14 @@ demonstration, run:
 cargo run --release -p csm-rs --example visual_match > match.svg
 ```
 
+To run the local browser-backed demo instead:
+
+```sh
+cargo run --release -p csm-rs --example interactive_server
+```
+
+Then open `http://127.0.0.1:7878`.
+
 Prepared scans can be refreshed in place with `update` or
 `update_cartesian`, retaining their allocation capacity. The
 `match_prepared_observed` method invokes a caller-supplied closure with each
