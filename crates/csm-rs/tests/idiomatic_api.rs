@@ -202,6 +202,10 @@ fn cartesian_explicit_angles_are_validated_and_preserved() {
             ..
         }
     ));
+    let mut duplicate = angles;
+    duplicate[1] = duplicate[0];
+    let err = CartesianScan::with_angles(&points, &duplicate, &valid).unwrap_err();
+    assert!(matches!(err, csm_rs::LaserDataError::DuplicateBearing(1)));
 }
 
 #[test]
