@@ -66,6 +66,17 @@ fn prepared_match_can_reuse_result_storage() {
 }
 
 #[test]
+fn prepared_scan_updates_without_changing_shape() {
+    let angles: Vec<f64> = (0..21).map(|i| -1.0 + i as f64 * 0.1).collect();
+    let readings = vec![8.0; angles.len()];
+    let valid = vec![true; angles.len()];
+    let mut scan = PreparedPolarScan::from_polar(angles, readings, valid).unwrap();
+    let updated = vec![7.5; scan.len()];
+    scan.update(&updated, &vec![true; scan.len()]).unwrap();
+    assert_eq!(scan.readings(), updated.as_slice());
+}
+
+#[test]
 fn borrowed_polar_rejects_mismatched_lengths() {
     let err = PolarScan::new(&[0.0; 10], &[1.0; 9], &[true; 10]).unwrap_err();
     assert!(matches!(
