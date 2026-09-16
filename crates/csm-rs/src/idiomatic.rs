@@ -30,12 +30,13 @@ impl<'a> CartesianScan<'a> {
                 actual: valid.len(),
             });
         }
-        if points
+        if let Some((index, _)) = points
             .iter()
             .zip(valid)
-            .any(|(p, ok)| *ok && (!p[0].is_finite() || !p[1].is_finite()))
+            .enumerate()
+            .find(|(_, (p, ok))| **ok && (!p[0].is_finite() || !p[1].is_finite()))
         {
-            return Err(LaserDataError::BadValidRay(0));
+            return Err(LaserDataError::BadValidRay(index));
         }
         if points.len() < 2 {
             return Err(LaserDataError::NraysOutOfRange);
