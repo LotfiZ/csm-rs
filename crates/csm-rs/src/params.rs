@@ -285,6 +285,7 @@ impl Params {
         }
         if self.reading_bounds.min < 0.0
             || self.reading_bounds.max <= self.reading_bounds.min
+            || self.correction_limits.max_angular_deg < 0.0
             || self.correction_limits.max_linear < 0.0
             || self.stopping.epsilon_xy < 0.0
             || self.stopping.epsilon_theta < 0.0
@@ -357,6 +358,9 @@ mod tests {
         assert_eq!(p.validate(), Err(ParamsError::InvalidIterationLimit));
         p = Params::default();
         p.reading_bounds.max = -1.0;
+        assert_eq!(p.validate(), Err(ParamsError::InvalidRange));
+        p = Params::default();
+        p.correction_limits.max_angular_deg = -1.0;
         assert_eq!(p.validate(), Err(ParamsError::InvalidRange));
     }
 
