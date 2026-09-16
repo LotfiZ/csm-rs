@@ -133,6 +133,13 @@ Then open `http://127.0.0.1:7878`.
 Pass an address as the first argument when another interface or port is needed,
 for example `cargo run --example interactive_server -- 0.0.0.0:8080`.
 
+To inspect imported Cartesian scans, provide one file (or a reference and
+sensor pair) containing one `x y` point per line:
+
+```sh
+cargo run --release -p csm-rs --example import_scan -- reference.txt sensor.txt > imported.html
+```
+
 Prepared scans can be refreshed in place with `update` or
 `update_cartesian`, retaining their allocation capacity. The
 `match_prepared_observed` method invokes a caller-supplied closure with each
