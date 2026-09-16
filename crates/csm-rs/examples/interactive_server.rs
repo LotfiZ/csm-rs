@@ -23,8 +23,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         })
         .collect();
     let body = format!("<!doctype html><meta charset='utf-8'><title>csm-rs</title><style>body{{font:16px sans-serif;background:#111827;color:#eee;max-width:720px;margin:2rem auto}}svg{{width:100%;background:#0b1220}}button{{margin:.5rem;padding:.5rem}}</style><h1>csm-rs interactive match</h1><svg id='view' viewBox='0 0 600 300'>{points}<circle id='robot' cx='300' cy='150' r='8' fill='#f59e0b'/></svg><p>pose={:?}, valid={}</p><button id='play'>play</button><button id='reset'>reset</button><script>let x=300,timer;const r=document.querySelector('#robot');function draw(){{r.setAttribute('cx',x)}}document.querySelector('#play').onclick=()=>{{clearInterval(timer);timer=setInterval(()=>{{x=x>560?40:x+4;draw()}},30)}};document.querySelector('#reset').onclick=()=>{{clearInterval(timer);x=300;draw()}};draw();</script>", outcome.pose, outcome.valid);
-    let listener = TcpListener::bind("127.0.0.1:7878")?;
-    println!("open http://127.0.0.1:7878");
+    let address = std::env::args()
+        .nth(1)
+        .unwrap_or_else(|| "127.0.0.1:7878".to_owned());
+    let listener = TcpListener::bind(&address)?;
+    println!("open http://{address}");
     for mut stream in listener.incoming().flatten() {
         let mut request = [0; 512];
         let _ = stream.read(&mut request);
