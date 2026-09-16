@@ -39,7 +39,7 @@ pub use idiomatic::{
     PreparedPolarScan,
 };
 pub use laser_data::{LaserData, LaserDataError};
-pub use params::Params;
+pub use params::{Params, ParamsError};
 pub use result::SmResult;
 
 /// Run point-to-line ICP scan matching.
