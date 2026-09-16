@@ -22,14 +22,22 @@ impl Mat2 {
     }
 
     pub fn transpose(&self) -> Self {
-        Self::new(std::array::from_fn(|r| std::array::from_fn(|c| self.data[c][r])))
+        Self::new(std::array::from_fn(|r| {
+            std::array::from_fn(|c| self.data[c][r])
+        }))
     }
 
     pub fn mul(&self, other: &Mat2) -> Mat2 {
         let (a, b) = (self.data, other.data);
         Mat2::new([
-            [a[0][0] * b[0][0] + a[0][1] * b[1][0], a[0][0] * b[0][1] + a[0][1] * b[1][1]],
-            [a[1][0] * b[0][0] + a[1][1] * b[1][0], a[1][0] * b[0][1] + a[1][1] * b[1][1]],
+            [
+                a[0][0] * b[0][0] + a[0][1] * b[1][0],
+                a[0][0] * b[0][1] + a[0][1] * b[1][1],
+            ],
+            [
+                a[1][0] * b[0][0] + a[1][1] * b[1][0],
+                a[1][0] * b[0][1] + a[1][1] * b[1][1],
+            ],
         ])
     }
 
@@ -64,7 +72,9 @@ impl Mat3 {
     }
 
     pub fn transpose(&self) -> Self {
-        Self::new(std::array::from_fn(|r| std::array::from_fn(|c| self.data[c][r])))
+        Self::new(std::array::from_fn(|r| {
+            std::array::from_fn(|c| self.data[c][r])
+        }))
     }
 
     pub fn mul(&self, other: &Mat3) -> Mat3 {
@@ -114,7 +124,9 @@ impl Mat4 {
     }
 
     pub fn transpose(&self) -> Self {
-        Self::new(std::array::from_fn(|r| std::array::from_fn(|c| self.data[c][r])))
+        Self::new(std::array::from_fn(|r| {
+            std::array::from_fn(|c| self.data[c][r])
+        }))
     }
 
     pub fn mul(&self, other: &Mat4) -> Mat4 {
@@ -131,9 +143,8 @@ impl Mat4 {
         let mut x = b;
         // Forward elimination with partial pivoting.
         for col in 0..4 {
-            let pivot = (col..4).max_by(|&r, &s| {
-                a[r][col].abs().partial_cmp(&a[s][col].abs()).unwrap()
-            })?;
+            let pivot =
+                (col..4).max_by(|&r, &s| a[r][col].abs().partial_cmp(&a[s][col].abs()).unwrap())?;
             if a[pivot][col] == 0.0 {
                 return None;
             }
@@ -221,6 +232,78 @@ pub fn angle_diff(a: f64, b: f64) -> f64 {
     t
 }
 
+/// Squared Euclidean distance between two 2D points.
+///
+/// C: `distance_squared_d()` in `sm/csm/math_utils.c`
+pub(crate) fn distance_squared(a: [f64; 2], b: [f64; 2]) -> f64 {
+    let x = a[0] - b[0];
+    let y = a[1] - b[1];
+    x * x + y * y
+}
+
+/// Euclidean norm of a 2D vector.
+///
+/// C: `norm_d()` in `sm/csm/math_utils.c`
+pub(crate) fn norm(point: [f64; 2]) -> f64 {
+    (point[0] * point[0] + point[1] * point[1]).sqrt()
+}
+
+/// Project a point onto the line through two points.
+///
+/// C: `projection_on_line_d()` in `sm/csm/math_utils.c`
+pub(crate) fn projection_on_line(a: [f64; 2], b: [f64; 2], point: [f64; 2]) -> [f64; 2] {
+    projection_on_line_with_distance(a, b, point).0
+}
+
+fn projection_on_line_with_distance(a: [f64; 2], b: [f64; 2], point: [f64; 2]) -> ([f64; 2], f64) {
+    let t0 = a[0] - b[0];
+    let t1 = a[1] - b[1];
+    let one_on_r = 1.0 / (t0 * t0 + t1 * t1).sqrt();
+    let c = t1 * one_on_r;
+    let s = -t0 * one_on_r;
+    let rho = c * a[0] + s * a[1];
+    let projection = [
+        c * rho + s * s * point[0] - c * s * point[1],
+        s * rho - c * s * point[0] + c * c * point[1],
+    ];
+    let distance = (rho - (c * point[0] + s * point[1])).abs();
+    (projection, distance)
+}
+
+/// Project a point onto a segment, clamping to the nearer endpoint.
+///
+/// C: `projection_on_segment_d()` in `sm/csm/math_utils.c`
+pub(crate) fn projection_on_segment(a: [f64; 2], b: [f64; 2], point: [f64; 2]) -> [f64; 2] {
+    let projection = projection_on_line(a, b, point);
+    let inside = (projection[0] - a[0]) * (projection[0] - b[0])
+        + (projection[1] - a[1]) * (projection[1] - b[1])
+        < 0.0;
+    if inside {
+        projection
+    } else if distance_squared(a, point) < distance_squared(b, point) {
+        a
+    } else {
+        b
+    }
+}
+
+/// Distance from a point to a segment.
+///
+/// C: `dist_to_segment_d()` in `sm/csm/math_utils.c`
+pub(crate) fn distance_to_segment(a: [f64; 2], b: [f64; 2], point: [f64; 2]) -> f64 {
+    let (projection, distance) = projection_on_line_with_distance(a, b, point);
+    let inside = (projection[0] - a[0]) * (projection[0] - b[0])
+        + (projection[1] - a[1]) * (projection[1] - b[1])
+        < 0.0;
+    if inside {
+        distance
+    } else {
+        distance_squared(a, point)
+            .min(distance_squared(b, point))
+            .sqrt()
+    }
+}
+
 /// Hash of a correspondence set, used for oscillation detection.
 /// Each entry is `Some((j1, j2))` for a valid correspondence, `None` otherwise.
 ///
@@ -251,9 +334,8 @@ pub(crate) fn invert_dyn(a: &[Vec<f64>]) -> Option<Vec<Vec<f64>>> {
     let mut perm: Vec<usize> = (0..n).collect();
     // LU in place, tracking row permutations.
     for col in 0..n {
-        let pivot = (col..n).max_by(|&r, &s| {
-            lu[r][col].abs().partial_cmp(&lu[s][col].abs()).unwrap()
-        })?;
+        let pivot =
+            (col..n).max_by(|&r, &s| lu[r][col].abs().partial_cmp(&lu[s][col].abs()).unwrap())?;
         if lu[pivot][col] == 0.0 {
             return None;
         }
@@ -272,7 +354,9 @@ pub(crate) fn invert_dyn(a: &[Vec<f64>]) -> Option<Vec<Vec<f64>>> {
     let mut inv = vec![vec![0.0; n]; n];
     for k in 0..n {
         // Unit vector of the permuted system: row r holds e_{perm[r]}.
-        let mut b: Vec<f64> = (0..n).map(|r| if perm[r] == k { 1.0 } else { 0.0 }).collect();
+        let mut b: Vec<f64> = (0..n)
+            .map(|r| if perm[r] == k { 1.0 } else { 0.0 })
+            .collect();
         // Forward substitution (unit lower).
         for r in 0..n {
             for c in 0..r {
@@ -342,11 +426,7 @@ mod tests {
         // Classic: det = 1, inverse is the known integer adjugate.
         let a = Mat3::new([[1.0, 2.0, 3.0], [0.0, 1.0, 4.0], [5.0, 6.0, 0.0]]);
         let inv = a.inv().expect("invertible");
-        let expected = [
-            [-24.0, 18.0, 5.0],
-            [20.0, -15.0, -4.0],
-            [-5.0, 4.0, 1.0],
-        ];
+        let expected = [[-24.0, 18.0, 5.0], [20.0, -15.0, -4.0], [-5.0, 4.0, 1.0]];
         for (r, row) in expected.iter().enumerate() {
             for (c, &want) in row.iter().enumerate() {
                 assert!((inv.data[r][c] - want).abs() < 1e-12);
@@ -478,11 +558,7 @@ mod tests {
             vec![5.0, 6.0, 0.0],
         ];
         let inv = invert_dyn(&a).expect("invertible");
-        let expected = [
-            [-24.0, 18.0, 5.0],
-            [20.0, -15.0, -4.0],
-            [-5.0, 4.0, 1.0],
-        ];
+        let expected = [[-24.0, 18.0, 5.0], [20.0, -15.0, -4.0], [-5.0, 4.0, 1.0]];
         for (r, row) in expected.iter().enumerate() {
             for (c, &want) in row.iter().enumerate() {
                 assert!((inv[r][c] - want).abs() < 1e-12, "({r},{c}): {}", inv[r][c]);
@@ -524,7 +600,8 @@ mod tests {
             [5.0, 6.0, 7.0, 8.0],
             [9.0, 10.0, 11.0, 12.0],
             [13.0, 14.0, 15.0, 16.0],
-        ]).transpose();
+        ])
+        .transpose();
         assert_eq!(m4.data[0], [1.0, 5.0, 9.0, 13.0]);
         assert_eq!(m4.data[3], [4.0, 8.0, 12.0, 16.0]);
     }

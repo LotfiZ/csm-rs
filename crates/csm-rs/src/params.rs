@@ -44,7 +44,10 @@ pub struct ReadingBounds {
 
 impl Default for ReadingBounds {
     fn default() -> Self {
-        Self { min: 0.0, max: 1000.0 }
+        Self {
+            min: 0.0,
+            max: 1000.0,
+        }
     }
 }
 
@@ -61,7 +64,10 @@ pub struct CorrectionLimits {
 
 impl Default for CorrectionLimits {
     fn default() -> Self {
-        Self { max_angular_deg: 90.0, max_linear: 2.0 }
+        Self {
+            max_angular_deg: 90.0,
+            max_linear: 2.0,
+        }
     }
 }
 
@@ -80,7 +86,11 @@ pub struct StoppingCriteria {
 
 impl Default for StoppingCriteria {
     fn default() -> Self {
-        Self { max_iterations: 1000, epsilon_xy: 0.0001, epsilon_theta: 0.0001 }
+        Self {
+            max_iterations: 1000,
+            epsilon_xy: 0.0001,
+            epsilon_theta: 0.0001,
+        }
     }
 }
 

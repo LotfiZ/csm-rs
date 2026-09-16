@@ -196,25 +196,33 @@ impl LaserData {
     pub fn create_jump_tables(&mut self) {
         for i in 0..self.nrays {
             let mut j = i as i32 + 1;
-            while (j as usize) < self.nrays && self.valid[j as usize] && self.readings[j as usize] <= self.readings[i] {
+            while (j as usize) < self.nrays
+                && self.valid[j as usize]
+                && self.readings[j as usize] <= self.readings[i]
+            {
                 j += 1;
             }
             self.up_bigger[i] = j - i as i32;
 
             let mut j = i as i32 + 1;
-            while (j as usize) < self.nrays && self.valid[j as usize] && self.readings[j as usize] >= self.readings[i] {
+            while (j as usize) < self.nrays
+                && self.valid[j as usize]
+                && self.readings[j as usize] >= self.readings[i]
+            {
                 j += 1;
             }
             self.up_smaller[i] = j - i as i32;
 
             let mut j = i as i32 - 1;
-            while j >= 0 && self.valid[j as usize] && self.readings[j as usize] >= self.readings[i] {
+            while j >= 0 && self.valid[j as usize] && self.readings[j as usize] >= self.readings[i]
+            {
                 j -= 1;
             }
             self.down_smaller[i] = j - i as i32;
 
             let mut j = i as i32 - 1;
-            while j >= 0 && self.valid[j as usize] && self.readings[j as usize] <= self.readings[i] {
+            while j >= 0 && self.valid[j as usize] && self.readings[j as usize] <= self.readings[i]
+            {
                 j -= 1;
             }
             self.down_bigger[i] = j - i as i32;
@@ -393,7 +401,9 @@ impl std::fmt::Display for LaserDataError {
             Self::ThetaBoundsMismatch => {
                 write!(f, "min/max theta do not match theta[0]/theta[last]")
             }
-            Self::BadValidRay(i) => write!(f, "ray #{i}: NaN or out-of-(0,100) reading on valid ray"),
+            Self::BadValidRay(i) => {
+                write!(f, "ray #{i}: NaN or out-of-(0,100) reading on valid ray")
+            }
             Self::BadCluster(i) => write!(f, "ray #{i}: bad cluster value"),
             Self::NegativeSigma(i) => write!(f, "ray #{i}: negative readings_sigma"),
             Self::TooFewValidRays => write!(f, "fewer than 10% valid rays"),
@@ -483,7 +493,10 @@ mod tests {
     fn validate_rejects_too_few_rays() {
         // C: nrays < 10 rejected
         let ld = LaserData::new(5, -1.0, 1.0);
-        assert!(matches!(ld.validate(), Err(LaserDataError::NraysOutOfRange)));
+        assert!(matches!(
+            ld.validate(),
+            Err(LaserDataError::NraysOutOfRange)
+        ));
     }
 
     #[test]
@@ -523,10 +536,7 @@ mod tests {
         // C: valid readings must be in (0, 100)
         let mut ld = valid_scan();
         ld.readings[7] = 150.0;
-        assert!(matches!(
-            ld.validate(),
-            Err(LaserDataError::BadValidRay(7))
-        ));
+        assert!(matches!(ld.validate(), Err(LaserDataError::BadValidRay(7))));
     }
 
     #[test]
@@ -534,10 +544,7 @@ mod tests {
         let mut ld = valid_scan();
         ld.valid[3] = false;
         ld.cluster[3] = 2;
-        assert!(matches!(
-            ld.validate(),
-            Err(LaserDataError::BadCluster(3))
-        ));
+        assert!(matches!(ld.validate(), Err(LaserDataError::BadCluster(3))));
     }
 
     #[test]

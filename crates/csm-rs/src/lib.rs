@@ -35,7 +35,17 @@ pub use result::SmResult;
 
 /// Run point-to-line ICP scan matching.
 ///
+/// The scans are mutable because CSM fills their cartesian, world-coordinate,
+/// and correspondence fields in place. A failed match is reported through
+/// `result.valid`; malformed scan data is rejected there as an invalid result,
+/// matching the C entry point's failure model.
+///
 /// C: `sm/csm/icp/icp.c:sm_icp()`
-pub fn sm_icp(params: &Params, result: &mut SmResult) {
-    icp::sm_icp(params, result)
+pub fn sm_icp(
+    params: &Params,
+    laser_ref: &mut LaserData,
+    laser_sens: &mut LaserData,
+    result: &mut SmResult,
+) {
+    icp::sm_icp(params, laser_ref, laser_sens, result)
 }

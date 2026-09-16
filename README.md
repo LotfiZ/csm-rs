@@ -18,9 +18,10 @@ docs for the C cross-references and per-decision rationale.
 The port is validated *golden-master* against the original C library:
 a throwaway C generator (in `fixture-generator/`, never built by cargo) links
 the reference implementation and emits JSON fixtures (scan pairs + params +
-expected results) checked into `crates/csm-rs/tests/fixtures/`. Tolerances:
-pose 1e-9, iterations/nvalid exact, covariance 1e-6 relative, plus
-first-iteration correspondence-hash equality.
+expected results) checked into `crates/csm-rs/tests/fixtures/`. The current
+tracer ticket checks pose to 1e-9 and `iterations`/`nvalid` exactly; the full
+target validation also covers covariance to 1e-6 relative error and
+first-iteration correspondence-hash equality as those stages land.
 
 ## Workspace layout
 
