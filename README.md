@@ -26,12 +26,14 @@ explicit max-iteration exhaustion case. The public tracer path checks pose to
 1e-9, `iterations`/`nvalid` exactly, and the configured first-iteration
 correspondence hash exactly. The crate-internal seam checks that tricks and
 naive correspondence search produce the same keys and hash on the synthetic
-and feature paths. The imported `stallo2` log records a known C behavior:
-CSM's smart and naive searches diverge on that scan's invalid sectors, so the
-Rust port keeps and tests each C path instead of hiding the divergence. The
-covariance fixture checks the closed-form result and its derivative matrices
-to 1e-6 relative error. Match errors use 1e-9 for synthetic cases and 2e-9
-for imported logs to account for their different native math paths.
+common path. Alpha-enabled fixtures validate the configured C path; CSM's
+smart routine intentionally omits the optional alpha filter. The imported
+`stallo2` log records another known C behavior: CSM's smart and naive searches
+diverge on that scan's invalid sectors, so the Rust port keeps and tests each
+C path instead of hiding the divergence. The covariance fixture checks the
+closed-form result and its derivative matrices to 1e-6 relative error. Match
+errors use 1e-9 for synthetic cases and 2e-9 for imported logs to account for
+their different native math paths.
 
 ## Quick start
 
