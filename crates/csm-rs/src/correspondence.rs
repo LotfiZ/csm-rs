@@ -9,6 +9,11 @@
 //! must produce identical correspondence sets — the same invariant C checks
 //! with `debug_verify_tricks`.
 //!
+//! The upstream `misc/tests/failure1/stallo2.log` regression corpus is an
+//! explicit exception: C's smart and naive searches diverge on its invalid
+//! sectors. The golden test records that divergence while checking the
+//! configured smart path and its first-iteration hash against C.
+//!
 //! The upstream tricks routine does not call `compatible()` for its optional
 //! alpha filter. That C asymmetry is preserved here; alpha-enabled fixtures
 //! therefore use the naive strategy at the public golden seam.
