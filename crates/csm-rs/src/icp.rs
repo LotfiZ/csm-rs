@@ -4,10 +4,10 @@
 //!     `sm/csm/icp/icp_loop.c` (`icp_loop`, `termination_criterion`)
 //!
 //! Ticket #5 keeps the loop intentionally small: transform the sensor scan,
-//! find naive correspondences, solve the closed-form PlICP update, and stop
-//! when the pose correction is below both configured thresholds. Outlier
-//! rejection, oscillation detection, restarts, and covariance are added by
-//! later tickets.
+//! find correspondences with the selected strategy, solve the closed-form
+//! PlICP update, and stop when the pose correction is below both configured
+//! thresholds. Outlier rejection, oscillation detection, restarts, and
+//! covariance are added by later tickets.
 
 use crate::correspondence::find_correspondences;
 use crate::laser_data::LaserData;
@@ -35,6 +35,16 @@ pub(crate) fn sm_icp(
     // C: `ld_invalid_if_outside()` in `icp.c`.
     laser_ref.invalid_if_outside(params.reading_bounds.min, params.reading_bounds.max);
     laser_sens.invalid_if_outside(params.reading_bounds.min, params.reading_bounds.max);
+
+    // C: `ld_create_jump_tables()` in `icp.c`. The table is needed by the
+    // tricks search and is also built for the debug equivalence check.
+    if matches!(
+        params.correspondence.search,
+        crate::params::CorrespondenceSearch::Tricks
+    ) || params.debug_verify_tricks
+    {
+        laser_ref.create_jump_tables();
+    }
 
     laser_ref.compute_cartesian();
     laser_sens.compute_cartesian();

@@ -1,4 +1,5 @@
 use csm_rs::laser_data::LaserData;
+use csm_rs::math::corr_hash;
 use csm_rs::params::{CorrespondenceSearch, DistanceMetric, Params};
 use csm_rs::{sm_icp, SmResult};
 use serde::Deserialize;
@@ -125,26 +126,145 @@ fn build_params(params: &FixtureParams) -> Params {
     result
 }
 
-#[test]
-fn identity_fixture_matches_c_reference() {
-    let fixture = read_fixture();
-    assert_eq!(fixture.schema, "csm-rs-fixture/v1");
-    assert_eq!(fixture.cases.len(), 1);
-
-    let case = &fixture.cases[0];
-    assert_eq!(case.name, "identity");
-    let params = build_params(&case.params);
+fn run_case(params: &Params, case: &Case) -> (SmResult, LaserData) {
     let mut laser_ref = build_scan(&case.laser_ref);
     let mut laser_sens = build_scan(&case.laser_sens);
     let mut result = SmResult::default();
+    sm_icp(params, &mut laser_ref, &mut laser_sens, &mut result);
+    (result, laser_sens)
+}
 
-    sm_icp(&params, &mut laser_ref, &mut laser_sens, &mut result);
+fn correspondence_keys(scan: &LaserData) -> Vec<Option<(i32, i32)>> {
+    scan.corr
+        .iter()
+        .map(|corr| corr.valid.then_some((corr.j1, corr.j2)))
+        .collect()
+}
 
-    assert_eq!(result.valid, case.expected.valid);
-    assert_eq!(result.iterations, case.expected.iterations);
-    assert_eq!(result.nvalid, case.expected.nvalid);
-    assert!((result.error - case.expected.error).abs() <= 1e-9);
-    for (actual, expected) in result.x.iter().zip(case.expected.x) {
-        assert!((actual - expected).abs() <= 1e-9, "{actual} != {expected}");
+#[test]
+fn fixture_cases_match_c_reference_and_each_strategy() {
+    let fixture = read_fixture();
+    assert_eq!(fixture.schema, "csm-rs-fixture/v1");
+
+    for case in &fixture.cases {
+        let params = build_params(&case.params);
+        let (result, _) = run_case(&params, case);
+
+        assert_eq!(result.valid, case.expected.valid, "case {}", case.name);
+        assert_eq!(
+            result.iterations, case.expected.iterations,
+            "case {}",
+            case.name
+        );
+        assert_eq!(result.nvalid, case.expected.nvalid, "case {}", case.name);
+        assert!(
+            (result.error - case.expected.error).abs() <= 1e-9,
+            "case {}: {} != {}",
+            case.name,
+            result.error,
+            case.expected.error
+        );
+        for (actual, expected) in result.x.iter().zip(case.expected.x) {
+            assert!(
+                (actual - expected).abs() <= 1e-9,
+                "case {}: {actual} != {expected}",
+                case.name
+            );
+        }
+
+        // Run both strategies through the public seam and compare the final
+        // correspondence key/hash as well as the match result, regardless of
+        // which strategy the fixture happens to configure.
+        let mut tricks_params = params.clone();
+        tricks_params.correspondence.search = CorrespondenceSearch::Tricks;
+        let (tricks_result, tricks_sens) = run_case(&tricks_params, case);
+        let mut naive_params = params.clone();
+        naive_params.correspondence.search = CorrespondenceSearch::Naive;
+        let (naive_result, naive_sens) = run_case(&naive_params, case);
+
+        assert_eq!(
+            tricks_result.valid, naive_result.valid,
+            "case {}",
+            case.name
+        );
+        assert_eq!(
+            tricks_result.iterations, naive_result.iterations,
+            "case {}",
+            case.name
+        );
+        assert_eq!(
+            tricks_result.nvalid, naive_result.nvalid,
+            "case {}",
+            case.name
+        );
+        assert!(
+            (tricks_result.error - naive_result.error).abs() <= 1e-9,
+            "case {}: {} != {}",
+            case.name,
+            tricks_result.error,
+            naive_result.error
+        );
+        for (actual, expected) in tricks_result.x.iter().zip(naive_result.x) {
+            assert!(
+                (actual - expected).abs() <= 1e-9,
+                "case {}: {actual} != {expected}",
+                case.name
+            );
+        }
+        let tricks_keys = correspondence_keys(&tricks_sens);
+        let naive_keys = correspondence_keys(&naive_sens);
+        assert_eq!(tricks_keys, naive_keys, "case {}", case.name);
+        assert_eq!(
+            corr_hash(&tricks_keys),
+            corr_hash(&naive_keys),
+            "case {}",
+            case.name
+        );
+
+        // Limit each public call to one pass so the correspondence fields
+        // still contain the first ICP iteration when their hashes are read.
+        // Force both strategies independently so a fixture's configured
+        // search mode cannot hide a broken alternate path.
+        let mut first_tricks_params = params.clone();
+        first_tricks_params.correspondence.search = CorrespondenceSearch::Tricks;
+        first_tricks_params.stopping.max_iterations = 1;
+        let mut first_naive_params = params.clone();
+        first_naive_params.correspondence.search = CorrespondenceSearch::Naive;
+        first_naive_params.stopping.max_iterations = 1;
+        let mut first_tricks_ref = build_scan(&case.laser_ref);
+        let mut first_tricks_sens = build_scan(&case.laser_sens);
+        let mut first_naive_ref = build_scan(&case.laser_ref);
+        let mut first_naive_sens = build_scan(&case.laser_sens);
+        let mut first_tricks_result = SmResult::default();
+        let mut first_naive_result = SmResult::default();
+        sm_icp(
+            &first_tricks_params,
+            &mut first_tricks_ref,
+            &mut first_tricks_sens,
+            &mut first_tricks_result,
+        );
+        sm_icp(
+            &first_naive_params,
+            &mut first_naive_ref,
+            &mut first_naive_sens,
+            &mut first_naive_result,
+        );
+        let first_tricks_keys: Vec<_> = first_tricks_sens
+            .corr
+            .iter()
+            .map(|corr| corr.valid.then_some((corr.j1, corr.j2)))
+            .collect();
+        let first_naive_keys: Vec<_> = first_naive_sens
+            .corr
+            .iter()
+            .map(|corr| corr.valid.then_some((corr.j1, corr.j2)))
+            .collect();
+        assert_eq!(first_tricks_keys, first_naive_keys, "case {}", case.name);
+        assert_eq!(
+            corr_hash(&first_tricks_keys),
+            corr_hash(&first_naive_keys),
+            "case {}",
+            case.name
+        );
     }
 }
