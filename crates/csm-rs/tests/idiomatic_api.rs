@@ -317,6 +317,18 @@ fn cartesian_explicit_angles_are_validated_and_preserved() {
 }
 
 #[test]
+fn prepared_cartesian_explicit_angles_are_preserved() {
+    let angles: Vec<f64> = (0..21).map(|i| -1.0 + i as f64 * 0.1).collect();
+    let points: Vec<[f64; 2]> = angles
+        .iter()
+        .map(|a| [8.0 * a.cos(), 8.0 * a.sin()])
+        .collect();
+    let scan =
+        PreparedPolarScan::from_cartesian_with_angles(&points, &angles, &[true; 21]).unwrap();
+    assert_eq!(scan.angles(), angles.as_slice());
+}
+
+#[test]
 fn cartesian_match_preserves_points() {
     let points: Vec<[f64; 2]> = (0..21)
         .map(|i| {
