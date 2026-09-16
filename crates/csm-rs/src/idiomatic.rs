@@ -112,6 +112,24 @@ impl PreparedMatcher {
         &mut self.sensor
     }
 
+    /// Update the streamed sensor frame while preserving its allocation.
+    pub fn update_sensor(
+        &mut self,
+        readings: &[f64],
+        valid: &[bool],
+    ) -> Result<(), LaserDataError> {
+        self.sensor.update(readings, valid)
+    }
+
+    /// Update the reference frame while preserving its allocation.
+    pub fn update_reference(
+        &mut self,
+        readings: &[f64],
+        valid: &[bool],
+    ) -> Result<(), LaserDataError> {
+        self.reference.update(readings, valid)
+    }
+
     pub fn match_once(&mut self) -> Result<MatchOutcome, LaserDataError> {
         let mut result = SmResult::default();
         icp::sm_icp_with_scratch(
