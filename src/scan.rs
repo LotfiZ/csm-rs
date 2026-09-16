@@ -127,7 +127,9 @@ impl<'a> CartesianScan<'a> {
     ///
     /// This is required when the ordering's neighbourhood is defined by
     /// something other than `atan2(y, x)` (for example a differently mounted
-    /// scanner). Bearing order must match the point order.
+    /// scanner). Bearing order must match the point order. Bearings of valid
+    /// points must be finite; a non-finite bearing on a missing return is
+    /// tolerated because that ray is never matched.
     pub fn with_angles(
         points: &'a [[f64; 2]],
         angles: &'a [f64],
@@ -141,8 +143,10 @@ impl<'a> CartesianScan<'a> {
             });
         }
         let mut scan = Self::new(points, valid)?;
-        if angles.iter().any(|angle| !angle.is_finite()) {
-            return Err(ScanError::BadValidRay(0));
+        for (i, angle) in angles.iter().enumerate() {
+            if valid[i] && !angle.is_finite() {
+                return Err(ScanError::NonFiniteBearing(i));
+            }
         }
         for i in 1..angles.len() {
             if valid[i] && valid[i - 1] && angles[i] == angles[i - 1] {
@@ -151,6 +155,23 @@ impl<'a> CartesianScan<'a> {
         }
         scan.angles = Some(angles);
         Ok(scan)
+    }
+
+    /// Convert this scan to the polar `(angles, readings)` pair used by the
+    /// engine. Bearings are preserved when supplied; otherwise they are
+    /// derived as `atan2(y, x)`. Non-finite derived bearings (only possible on
+    /// missing returns) are filled from neighbouring finite bearings so scan
+    /// ordering metadata remains usable.
+    pub(crate) fn to_polar_parts(self) -> (Vec<f64>, Vec<f64>) {
+        let mut angles: Vec<f64> = match self.angles {
+            Some(angles) => angles.to_vec(),
+            None => self.points.iter().map(|p| p[1].atan2(p[0])).collect(),
+        };
+        if angles.iter().any(|angle| !angle.is_finite()) {
+            fill_nonfinite(&mut angles);
+        }
+        let readings = self.points.iter().map(|p| p[0].hypot(p[1])).collect();
+        (angles, readings)
     }
 
     /// Sensor-frame `(x, y)` points in metres, in scan order.
@@ -169,11 +190,47 @@ impl<'a> CartesianScan<'a> {
         self.angles
     }
 
+    /// The effective bearings the matcher uses, in scan order.
+    ///
+    /// Returns the caller-supplied bearings when present, otherwise
+    /// `atan2(y, x)` for each point. Bearings of missing returns whose
+    /// coordinates are absent are filled from their nearest finite
+    /// neighbours. This never reorders the scan.
+    pub fn bearings(&self) -> Vec<f64> {
+        self.to_polar_parts().0
+    }
+
     pub fn len(&self) -> usize {
         self.points.len()
     }
 
     pub fn is_empty(&self) -> bool {
         self.points.is_empty()
+    }
+}
+
+/// Replace non-finite entries with the nearest finite neighbour, filling
+/// forward then backward. Used for missing returns whose coordinates are
+/// absent and whose derived bearing is therefore undefined.
+fn fill_nonfinite(values: &mut [f64]) {
+    let mut last = f64::NAN;
+    for value in values.iter_mut() {
+        if value.is_finite() {
+            last = *value;
+        } else if last.is_finite() {
+            *value = last;
+        }
+    }
+    let mut next = f64::NAN;
+    for value in values.iter_mut().rev() {
+        if value.is_finite() {
+            next = *value;
+        } else if next.is_finite() {
+            *value = next;
+        } else {
+            // No finite bearing anywhere in the scan: use a neutral value so
+            // the ordering metadata stays well-formed.
+            *value = 0.0;
+        }
     }
 }

@@ -306,3 +306,162 @@ fn cartesian_validation_reports_offending_ray() {
     let err = CartesianScan::new(&points, &[true; 21]).unwrap_err();
     assert_eq!(err, csm_rs::ScanError::BadValidRay(7));
 }
+
+#[test]
+fn cartesian_recovers_the_same_known_rotation_as_polar() {
+    let n = 41;
+    let phi = 0.05;
+    let angles: Vec<f64> = (0..n).map(|i| -1.0 + i as f64 * 0.05).collect();
+    let reading = |a: f64| 8.0 + 0.5 * (3.0 * a).sin();
+    let reference_points: Vec<[f64; 2]> = angles
+        .iter()
+        .map(|&a| [reading(a) * a.cos(), reading(a) * a.sin()])
+        .collect();
+    let sensor_points: Vec<[f64; 2]> = angles
+        .iter()
+        .map(|&a| {
+            let r = reading(a + phi);
+            [r * a.cos(), r * a.sin()]
+        })
+        .collect();
+    let valid = vec![true; n];
+
+    let by_polar = Matcher::new(Params::default())
+        .unwrap()
+        .match_polar(
+            PolarScan::new(
+                &angles,
+                &angles.iter().map(|&a| reading(a)).collect::<Vec<_>>(),
+                &valid,
+            )
+            .unwrap(),
+            PolarScan::new(
+                &angles,
+                &angles.iter().map(|&a| reading(a + phi)).collect::<Vec<_>>(),
+                &valid,
+            )
+            .unwrap(),
+        )
+        .unwrap();
+    let by_cartesian = Matcher::new(Params::default())
+        .unwrap()
+        .match_cartesian(
+            CartesianScan::new(&reference_points, &valid).unwrap(),
+            CartesianScan::new(&sensor_points, &valid).unwrap(),
+        )
+        .unwrap();
+
+    assert!(by_polar.valid && by_cartesian.valid);
+    assert!((by_cartesian.pose.theta - phi).abs() < 1e-3);
+    for (p, c) in by_polar.pose.to_array().iter().zip(by_cartesian.pose.to_array()) {
+        assert!((p - c).abs() < 1e-6, "polar vs cartesian: {p} != {c}");
+    }
+}
+
+#[test]
+fn cartesian_honors_explicit_guess_and_reference_selection() {
+    let points: Vec<[f64; 2]> = (0..21)
+        .map(|i| {
+            let a = -1.0 + i as f64 * 0.1;
+            [8.0 * a.cos(), 8.0 * a.sin()]
+        })
+        .collect();
+    let valid = vec![true; 21];
+    let reference = CartesianScan::new(&points, &valid).unwrap();
+    let sensor = CartesianScan::new(&points, &valid).unwrap();
+    let params = Params {
+        stopping: csm_rs::StoppingCriteria {
+            max_iterations: 1,
+            ..Params::default().stopping
+        },
+        restart: csm_rs::RestartParams {
+            enabled: false,
+            ..Params::default().restart
+        },
+        ..Params::default()
+    };
+    let matcher = Matcher::new(params).unwrap();
+    let identity = matcher.match_cartesian(reference, sensor).unwrap();
+    let guessed = matcher
+        .match_cartesian_from(reference, sensor, Pose::new(0.2, -0.1, 0.05))
+        .unwrap();
+    assert!(identity.valid && guessed.valid);
+    assert!(identity
+        .pose
+        .to_array()
+        .iter()
+        .zip(guessed.pose.to_array())
+        .any(|(a, b)| (a - b).abs() > 1e-9));
+}
+
+#[test]
+fn cartesian_missing_returns_keep_positions() {
+    let mut points: Vec<[f64; 2]> = (0..21)
+        .map(|i| {
+            let a = -1.0 + i as f64 * 0.1;
+            [8.0 * a.cos(), 8.0 * a.sin()]
+        })
+        .collect();
+    let mut valid = vec![true; 21];
+    // A missing return may carry an unusable point; it stays in its slot.
+    points[5] = [f64::NAN, f64::NAN];
+    valid[5] = false;
+    let scan = CartesianScan::new(&points, &valid).expect("missing returns are allowed");
+    assert_eq!(scan.len(), 21);
+    assert!(!scan.valid()[5]);
+    assert!(scan.points()[5][0].is_nan());
+
+    // The scan still matches; the missing return is simply not used.
+    let reference = CartesianScan::new(&points, &valid).unwrap();
+    let outcome = Matcher::new(Params::default())
+        .unwrap()
+        .match_cartesian(reference, scan)
+        .unwrap();
+    assert!(outcome.valid);
+}
+
+#[test]
+fn cartesian_rejects_malformed_dimensions_and_valid_nonfinite_points() {
+    let points = vec![[1.0, 0.0]; 21];
+    let err = CartesianScan::new(&points, &[true; 20]).unwrap_err();
+    assert!(matches!(
+        err,
+        csm_rs::ScanError::InconsistentLengths { field: "valid", .. }
+    ));
+
+    let mut bad = points.clone();
+    bad[3] = [f64::INFINITY, 0.0];
+    let err = CartesianScan::new(&bad, &[true; 21]).unwrap_err();
+    assert_eq!(err, csm_rs::ScanError::BadValidRay(3));
+}
+
+#[test]
+fn cartesian_rejects_nonfinite_bearing_on_a_valid_point() {
+    let points = vec![[8.0, 0.0]; 21];
+    let valid = vec![true; 21];
+    let mut angles: Vec<f64> = (0..21).map(|i| i as f64 * 0.03).collect();
+    angles[4] = f64::NAN;
+    let err = CartesianScan::with_angles(&points, &angles, &valid).unwrap_err();
+    assert_eq!(err, csm_rs::ScanError::NonFiniteBearing(4));
+
+    // A non-finite bearing on a missing return is tolerated.
+    let mut valid = valid;
+    valid[4] = false;
+    assert!(CartesianScan::with_angles(&points, &angles, &valid).is_ok());
+}
+
+#[test]
+fn cartesian_derived_bearings_follow_input_order() {
+    // Points are ordered by increasing bearing; the derived bearings must
+    // follow that order rather than being sorted into something else.
+    let points: Vec<[f64; 2]> = (0..21)
+        .map(|i| {
+            let a = -1.0 + i as f64 * 0.1;
+            [8.0 * a.cos(), 8.0 * a.sin()]
+        })
+        .collect();
+    let scan = CartesianScan::new(&points, &[true; 21]).unwrap();
+    assert!(scan.angles().is_none());
+    let angles = scan.bearings();
+    assert!(angles.windows(2).all(|w| w[1] > w[0]));
+}
