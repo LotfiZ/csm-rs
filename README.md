@@ -137,6 +137,10 @@ When covariance is not needed, `Matcher::pose_only(Params::default())`
 disables the optional covariance and derivative calculations for a smaller
 embedded runtime path.
 
+Use `Matcher::try_new(params)` when configuration comes from a file or another
+runtime source; it validates finite values, ranges, and the iteration limit
+before the matcher is constructed.
+
 Regenerate the corpus with the C reference source checked out at
 `/home/agx/workspace/csm-src`:
 
