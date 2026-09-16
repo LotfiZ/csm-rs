@@ -7,7 +7,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let valid = vec![true; angles.len()];
     let reference = PolarScan::new(&angles, &readings, &valid)?;
     let sensor = PolarScan::new(&angles, &readings, &valid)?;
-    let outcome = Matcher::new(Params::default()).match_polar(reference, sensor)?;
+    let mut params = Params::default();
+    params.do_compute_covariance = true;
+    let outcome = Matcher::new(params).match_polar(reference, sensor)?;
+    let covariance = outcome
+        .covariance
+        .map(|matrix| format!("{:?}", matrix.data))
+        .unwrap_or_else(|| "unavailable".to_owned());
 
     let points: Vec<String> = angles
         .iter()
@@ -22,7 +28,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .replace("__POINTS__", &format!("[{}]", points.join(",")))
         .replace("__X__", &format!("{:.3}", outcome.pose[0]))
         .replace("__Y__", &format!("{:.3}", outcome.pose[1]))
-        .replace("__THETA__", &format!("{:.3}", outcome.pose[2]));
+        .replace("__THETA__", &format!("{:.3}", outcome.pose[2]))
+        .replace("</main>", &format!("<p>covariance: {covariance}</p></main>"));
     println!("{html}");
     Ok(())
 }
