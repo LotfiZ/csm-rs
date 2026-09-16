@@ -200,4 +200,5 @@ fn prepared_matcher_reuses_owned_scans() {
         PreparedMatcher::new(Matcher::pose_only(Params::default()), reference, sensor).unwrap();
     assert!(workspace.match_once().unwrap().valid);
     assert_eq!(workspace.reference().len(), 21);
+    workspace.update_sensor(&[8.0; 21], &[true; 21]).unwrap();
 }
