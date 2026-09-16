@@ -245,6 +245,19 @@ pub enum ParamsError {
     InvalidIterationLimit,
 }
 
+impl core::fmt::Display for ParamsError {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        let message = match self {
+            Self::NonFinite => "matcher parameters contain a non-finite value",
+            Self::InvalidRange => "matcher parameters contain an invalid range",
+            Self::InvalidIterationLimit => "matcher iteration limit must be non-negative",
+        };
+        f.write_str(message)
+    }
+}
+
+impl std::error::Error for ParamsError {}
+
 impl Params {
     /// Validate numeric settings before constructing a matcher.
     pub fn validate(&self) -> Result<(), ParamsError> {
