@@ -377,6 +377,12 @@ impl Matcher {
         Ok(Self { params })
     }
 
+    /// Construct a validated pose-only matcher for constrained deployments.
+    pub fn try_pose_only(mut params: Params) -> Result<Self, crate::params::ParamsError> {
+        params.do_compute_covariance = false;
+        Self::try_new(params)
+    }
+
     #[must_use]
     pub fn new(params: Params) -> Self {
         Self { params }
