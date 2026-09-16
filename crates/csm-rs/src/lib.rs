@@ -24,12 +24,14 @@
 pub mod correspondence;
 pub mod covariance;
 pub mod icp;
+pub mod idiomatic;
 pub mod laser_data;
 pub mod math;
 pub mod params;
 pub mod result;
 pub mod solver;
 
+pub use idiomatic::{MatchOutcome, Matcher, PolarScan};
 pub use laser_data::{LaserData, LaserDataError};
 pub use params::Params;
 pub use result::SmResult;
