@@ -13,18 +13,22 @@ fn main() {
     let mut reference =
         PreparedPolarScan::from_polar(angles.clone(), readings.clone(), valid.clone()).unwrap();
     let mut sensor = PreparedPolarScan::from_polar(angles, readings, valid).unwrap();
-    let matcher = Matcher::new(Params::default());
-    let start = Instant::now();
-    let mut successful = 0;
-    for _ in 0..30 {
-        let outcome = matcher
-            .match_prepared(black_box(&mut reference), black_box(&mut sensor))
-            .unwrap();
-        successful += usize::from(outcome.valid);
-        black_box(outcome);
+    for (label, matcher) in [
+        ("full", Matcher::new(Params::default())),
+        ("pose_only", Matcher::pose_only(Params::default())),
+    ] {
+        let start = Instant::now();
+        let mut successful = 0;
+        for _ in 0..30 {
+            let outcome = matcher
+                .match_prepared(black_box(&mut reference), black_box(&mut sensor))
+                .unwrap();
+            successful += usize::from(outcome.valid);
+            black_box(outcome);
+        }
+        println!(
+            "mode={label},rays=720,repetitions=30,total_ms={:.3},successful_matches={successful}",
+            start.elapsed().as_secs_f64() * 1e3
+        );
     }
-    println!(
-        "rays=720,repetitions=30,total_ms={:.3},successful_matches={successful}",
-        start.elapsed().as_secs_f64() * 1e3
-    );
 }
