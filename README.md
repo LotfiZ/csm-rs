@@ -145,6 +145,9 @@ iteration limit, found no correspondences, or failed for another reason.
 failed uncertainty diagnostics, so an accepted pose remains usable when its
 optional covariance cannot be produced.
 
+Embedded integrations can inspect `PreparedMatcher::workspace_bytes()` and
+`capacities()` before entering a fixed-rate loop.
+
 For a fixed-shape stream, `Matcher::prepare` retains the scan and ICP
 workspace across frames:
 
