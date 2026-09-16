@@ -84,6 +84,13 @@ The example simulates a robot scanning a square room. It needs no input files,
 extra dependencies, or C installation. Change `FIRST_SENSOR_POSE` in
 `crates/csm-rs/examples/scan_matching.rs` to try another small movement.
 
+Performance baselines are dependency-free and reproducible in release mode:
+
+```sh
+cargo run --release -p csm-rs --example benchmark_baseline
+cargo run --release -p csm-rs --example benchmark_prepared
+```
+
 The idiomatic API borrows application buffers and returns a typed outcome:
 
 ```rust
