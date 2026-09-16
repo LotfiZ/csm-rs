@@ -19,7 +19,7 @@ use crate::math::{corr_hash_iter, ominus, pose_diff};
 use crate::params::DistanceMetric;
 use crate::params::Params;
 use crate::result::SmResult;
-use crate::solver::compute_next_estimate;
+use crate::solver::{compute_next_estimate_with_scratch, GpcCorrespondence};
 
 /// Run point-to-line ICP through the CSM shell.
 ///
@@ -129,6 +129,7 @@ pub(crate) struct IcpScratch {
     nearest_distances: Vec<f64>,
     distances_by_sensor: Vec<f64>,
     distances: Vec<f64>,
+    correspondences: Vec<GpcCorrespondence>,
 }
 
 impl IcpScratch {
@@ -138,6 +139,7 @@ impl IcpScratch {
             nearest_distances: vec![0.0; reference_rays],
             distances_by_sensor: vec![0.0; sensor_rays],
             distances: Vec::with_capacity(sensor_rays),
+            correspondences: Vec::with_capacity(sensor_rays),
         }
     }
 }
@@ -285,7 +287,13 @@ fn icp_loop(
             };
         }
 
-        let Some(next) = compute_next_estimate(params, laser_ref, laser_sens, x_old) else {
+        let Some(next) = compute_next_estimate_with_scratch(
+            params,
+            laser_ref,
+            laser_sens,
+            x_old,
+            &mut scratch.correspondences,
+        ) else {
             return IcpOutcome {
                 success: false,
                 x: x_new,
