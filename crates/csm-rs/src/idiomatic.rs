@@ -406,6 +406,25 @@ impl Matcher {
         self.prepare(reference, sensor)
     }
 
+    /// Build a reusable workspace directly from borrowed polar frame data.
+    pub fn prepare_polar(
+        &self,
+        reference: PolarScan<'_>,
+        sensor: PolarScan<'_>,
+    ) -> Result<PreparedMatcher, LaserDataError> {
+        let reference = PreparedPolarScan::from_polar(
+            reference.angles.to_vec(),
+            reference.readings.to_vec(),
+            reference.valid.to_vec(),
+        )?;
+        let sensor = PreparedPolarScan::from_polar(
+            sensor.angles.to_vec(),
+            sensor.readings.to_vec(),
+            sensor.valid.to_vec(),
+        )?;
+        self.prepare(reference, sensor)
+    }
+
     /// Match two borrowed polar scans without modifying caller buffers.
     pub fn match_polar(
         &self,
