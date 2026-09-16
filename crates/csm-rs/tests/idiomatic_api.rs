@@ -238,6 +238,23 @@ fn prepared_match_supports_search_and_outlier_options() {
 }
 
 #[test]
+fn prepared_match_supports_restart_and_bounded_termination() {
+    let angles: Vec<f64> = (0..41).map(|i| -1.0 + i as f64 * 0.05).collect();
+    let readings = vec![8.0; angles.len()];
+    let valid = vec![true; angles.len()];
+    let reference =
+        PreparedPolarScan::from_polar(angles.clone(), readings.clone(), valid.clone()).unwrap();
+    let sensor = PreparedPolarScan::from_polar(angles, readings, valid).unwrap();
+    let mut params = Params::default();
+    params.first_guess = [0.05, -0.03, 0.02];
+    params.stopping.max_iterations = 20;
+    params.restart.enabled = true;
+    let mut workspace = Matcher::new(params).prepare(reference, sensor).unwrap();
+    let outcome = workspace.match_once().unwrap();
+    assert!(outcome.iterations <= 20 * 7);
+}
+
+#[test]
 fn cartesian_explicit_angles_are_validated_and_preserved() {
     let points = vec![[8.0, 0.0]; 21];
     let valid = vec![true; 21];
