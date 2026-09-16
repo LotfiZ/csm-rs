@@ -106,6 +106,12 @@ demonstration, run:
 cargo run --release -p csm-rs --example visual_match > match.svg
 ```
 
+Prepared scans can be refreshed in place with `update` or
+`update_cartesian`, retaining their allocation capacity. The
+`match_prepared_observed` method invokes a caller-supplied closure with each
+outcome, which is suitable for metrics, logging, or a UI adapter without a
+runtime logging dependency.
+
 Regenerate the corpus with the C reference source checked out at
 `/home/agx/workspace/csm-src`:
 
