@@ -16,5 +16,7 @@
 - Removed the inherited 10,000-ray ceiling from idiomatic scan validation.
 - Added a dependency-free interactive HTML visual example and idiomatic API examples.
 - Added Linux x86_64/aarch64 CI checks and an MSRV check.
+- Added prepared workspace memory introspection and explicit capacity-overflow
+  errors for fixed-shape streaming updates.
 
 The legacy `sm_icp` API remains available while the idiomatic API evolves.
