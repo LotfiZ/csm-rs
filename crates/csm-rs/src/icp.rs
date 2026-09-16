@@ -10,10 +10,12 @@
 //! shell follow the C control flow. Optional Censi covariance is evaluated
 //! after the final correspondence set has been selected.
 
-use crate::correspondence::{find_correspondences, kill_outliers_double, kill_outliers_trim};
+use crate::correspondence::{
+    find_correspondences, kill_outliers_double_with_scratch, kill_outliers_trim_with_scratch,
+};
 use crate::covariance::compute_covariance_exact;
 use crate::laser_data::{LaserData, LaserDataError};
-use crate::math::{corr_hash, ominus, pose_diff};
+use crate::math::{corr_hash_iter, ominus, pose_diff};
 use crate::params::DistanceMetric;
 use crate::params::Params;
 use crate::result::SmResult;
@@ -202,6 +204,9 @@ fn icp_loop(
 
     let max_iterations = params.stopping.max_iterations.max(0) as usize;
     let mut hashes = Vec::with_capacity(max_iterations);
+    let mut nearest_distances = vec![0.0; laser_ref.nrays];
+    let mut distances_by_sensor = vec![0.0; laser_sens.nrays];
+    let mut distances = Vec::with_capacity(laser_sens.nrays);
     for iteration in 0..max_iterations {
         // C: `ld_compute_world_coords(laser_sens, x_old)`.
         laser_sens.compute_world_coords(&x_old);
@@ -221,9 +226,15 @@ fn icp_loop(
         // C: `kill_outliers_double()` followed by `kill_outliers_trim()` in
         // `sm/csm/icp/icp_loop.c`.
         if params.outliers.remove_doubles {
-            kill_outliers_double(laser_ref, laser_sens);
+            kill_outliers_double_with_scratch(laser_ref, laser_sens, &mut nearest_distances);
         }
-        let trimmed = kill_outliers_trim(&params.outliers, laser_ref, laser_sens);
+        let trimmed = kill_outliers_trim_with_scratch(
+            &params.outliers,
+            laser_ref,
+            laser_sens,
+            &mut distances_by_sensor,
+            &mut distances,
+        );
         let nvalid = trimmed.nvalid;
         if (nvalid as f64) < laser_sens.nrays as f64 * 0.05 {
             return IcpOutcome {
@@ -264,9 +275,8 @@ fn icp_loop(
         let correspondence_keys = laser_sens
             .corr
             .iter()
-            .map(|corr| corr.valid.then_some((corr.j1, corr.j2)))
-            .collect::<Vec<_>>();
-        let hash = corr_hash(&correspondence_keys);
+            .map(|corr| corr.valid.then_some((corr.j1, corr.j2)));
+        let hash = corr_hash_iter(correspondence_keys);
         let oscillating =
             params.correspondence.metric == DistanceMetric::PointToLine && hashes.contains(&hash);
         hashes.push(hash);

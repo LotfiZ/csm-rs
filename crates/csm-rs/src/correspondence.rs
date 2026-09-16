@@ -341,13 +341,22 @@ pub(crate) fn find_correspondences_naive(
 /// CSM's fixed three-times-distance rule of the nearest match.
 ///
 /// C: `kill_outliers_double()` in `sm/csm/icp/icp_outliers.c`.
+#[cfg(test)]
 pub(crate) fn kill_outliers_double(laser_ref: &LaserData, laser_sens: &mut LaserData) {
+    let mut nearest = vec![0.0; laser_ref.nrays];
+    kill_outliers_double_with_scratch(laser_ref, laser_sens, &mut nearest);
+}
+
+pub(crate) fn kill_outliers_double_with_scratch(
+    laser_ref: &LaserData,
+    laser_sens: &mut LaserData,
+    nearest_distances: &mut [f64],
+) {
     const THRESHOLD: f64 = 3.0;
+    let nearest_distances = &mut nearest_distances[..laser_ref.nrays];
+    nearest_distances.fill(1_000_000.0);
 
-    let mut nearest_distances = vec![1_000_000.0_f64; laser_ref.nrays];
-    let mut sensor_distances = vec![f64::NAN; laser_sens.nrays];
-
-    for (i, correspondence) in laser_sens.corr.iter().enumerate() {
+    for correspondence in &laser_sens.corr {
         if !correspondence.valid {
             continue;
         }
@@ -357,11 +366,10 @@ pub(crate) fn kill_outliers_double(laser_ref: &LaserData, laser_sens: &mut Laser
         if j1 >= laser_ref.nrays {
             continue;
         }
-        sensor_distances[i] = correspondence.dist2_j1;
         nearest_distances[j1] = nearest_distances[j1].min(correspondence.dist2_j1);
     }
 
-    for (i, correspondence) in laser_sens.corr.iter_mut().enumerate() {
+    for correspondence in &mut laser_sens.corr {
         if !correspondence.valid {
             continue;
         }
@@ -369,7 +377,7 @@ pub(crate) fn kill_outliers_double(laser_ref: &LaserData, laser_sens: &mut Laser
             continue;
         };
         if j1 < laser_ref.nrays
-            && sensor_distances[i] > THRESHOLD * THRESHOLD * nearest_distances[j1]
+            && correspondence.dist2_j1 > THRESHOLD * THRESHOLD * nearest_distances[j1]
         {
             // C changes only the valid bit in this pass; preserve the other
             // fields until the trim pass, exactly as `kill_outliers_double()`.
@@ -381,13 +389,33 @@ pub(crate) fn kill_outliers_double(laser_ref: &LaserData, laser_sens: &mut Laser
 /// Trim correspondences using the fixed-percentile and adaptive thresholds.
 ///
 /// C: `kill_outliers_trim()` in `sm/csm/icp/icp_outliers.c`.
+#[cfg(test)]
 pub(crate) fn kill_outliers_trim(
     params: &OutlierParams,
     laser_ref: &LaserData,
     laser_sens: &mut LaserData,
 ) -> OutlierResult {
     let mut distances_by_sensor = vec![f64::NAN; laser_sens.nrays];
-    let mut distances = Vec::new();
+    let mut distances = Vec::with_capacity(laser_sens.nrays);
+    kill_outliers_trim_with_scratch(
+        params,
+        laser_ref,
+        laser_sens,
+        &mut distances_by_sensor,
+        &mut distances,
+    )
+}
+
+pub(crate) fn kill_outliers_trim_with_scratch(
+    params: &OutlierParams,
+    laser_ref: &LaserData,
+    laser_sens: &mut LaserData,
+    distances_by_sensor: &mut [f64],
+    distances: &mut Vec<f64>,
+) -> OutlierResult {
+    let distances_by_sensor = &mut distances_by_sensor[..laser_sens.nrays];
+    distances_by_sensor.fill(f64::NAN);
+    distances.clear();
 
     for (i, distance_slot) in distances_by_sensor.iter_mut().enumerate() {
         if !laser_sens.corr[i].valid {
@@ -407,7 +435,7 @@ pub(crate) fn kill_outliers_trim(
         };
     }
 
-    distances.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+    distances.sort_unstable_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
     let max_percentile = percentile_index(distances.len(), params.max_perc);
     let adaptive_percentile = percentile_index(distances.len(), params.adaptive_order);
     let percentile_error_limit = distances[max_percentile];
