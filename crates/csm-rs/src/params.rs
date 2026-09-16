@@ -359,4 +359,12 @@ mod tests {
         p.reading_bounds.max = -1.0;
         assert_eq!(p.validate(), Err(ParamsError::InvalidRange));
     }
+
+    #[test]
+    fn validation_error_has_stable_display_text() {
+        assert_eq!(
+            ParamsError::NonFinite.to_string(),
+            "matcher parameters contain a non-finite value"
+        );
+    }
 }
