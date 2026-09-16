@@ -356,7 +356,9 @@ fn prepared_matcher_reuses_owned_scans() {
     let sensor = PreparedPolarScan::from_polar(angles, readings, valid).unwrap();
     let mut workspace =
         PreparedMatcher::new(Matcher::pose_only(Params::default()), reference, sensor).unwrap();
-    assert!(workspace.match_once().unwrap().valid);
+    let outcome = workspace.match_once().unwrap();
+    assert!(outcome.valid);
+    assert_eq!(outcome.termination, csm_rs::TerminationReason::Converged);
     assert_eq!(workspace.reference().len(), 21);
     assert_eq!(workspace.capacities(), (21, 21));
     assert!(workspace.workspace_bytes() > 0);
