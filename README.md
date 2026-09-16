@@ -108,6 +108,11 @@ if outcome.converged() {
 }
 ```
 
+The legacy `sm_icp` function remains available for conformance tooling and
+existing callers. New integrations should use `Matcher::prepare_polar`,
+`Matcher::prepare_cartesian`, or `Matcher::prepare` so scan ownership and
+workspace reuse are explicit.
+
 For fixed-rate applications, create `PreparedPolarScan` values once and reuse
 them with `match_prepared` or `match_prepared_into`. Ordered Cartesian points
 are also accepted through `CartesianScan`. To generate a browser-viewable SVG
