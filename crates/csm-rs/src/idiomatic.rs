@@ -18,6 +18,7 @@ pub struct PolarScan<'a> {
 #[derive(Clone, Copy, Debug)]
 pub struct CartesianScan<'a> {
     points: &'a [[f64; 2]],
+    angles: Option<&'a [f64]>,
     valid: &'a [bool],
 }
 
@@ -41,7 +42,32 @@ impl<'a> CartesianScan<'a> {
         if points.len() < 10 {
             return Err(LaserDataError::NraysOutOfRange);
         }
-        Ok(Self { points, valid })
+        Ok(Self {
+            points,
+            angles: None,
+            valid,
+        })
+    }
+
+    /// Construct Cartesian input with caller-supplied per-beam bearings.
+    pub fn with_angles(
+        points: &'a [[f64; 2]],
+        angles: &'a [f64],
+        valid: &'a [bool],
+    ) -> Result<Self, LaserDataError> {
+        if angles.len() != points.len() {
+            return Err(LaserDataError::InconsistentLengths {
+                field: "angles",
+                expected: points.len(),
+                actual: angles.len(),
+            });
+        }
+        let mut scan = Self::new(points, valid)?;
+        if angles.iter().any(|angle| !angle.is_finite()) {
+            return Err(LaserDataError::BadValidRay(0));
+        }
+        scan.angles = Some(angles);
+        Ok(scan)
     }
 
     pub fn points(&self) -> &'a [[f64; 2]] {
@@ -49,6 +75,9 @@ impl<'a> CartesianScan<'a> {
     }
     pub fn valid(&self) -> &'a [bool] {
         self.valid
+    }
+    pub fn angles(&self) -> Option<&'a [f64]> {
+        self.angles
     }
     pub fn len(&self) -> usize {
         self.points.len()
@@ -211,6 +240,16 @@ impl PreparedPolarScan {
         let angles = scan.points.iter().map(|p| p[1].atan2(p[0])).collect();
         let readings = scan.points.iter().map(|p| p[0].hypot(p[1])).collect();
         Self::from_polar(angles, readings, valid.to_vec())
+    }
+
+    pub fn from_cartesian_with_angles(
+        points: &[[f64; 2]],
+        angles: &[f64],
+        valid: &[bool],
+    ) -> Result<Self, LaserDataError> {
+        let scan = CartesianScan::with_angles(points, angles, valid)?;
+        let readings = scan.points.iter().map(|p| p[0].hypot(p[1])).collect();
+        Self::from_polar(angles.to_vec(), readings, valid.to_vec())
     }
 
     pub fn len(&self) -> usize {
