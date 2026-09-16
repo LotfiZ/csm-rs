@@ -1,6 +1,10 @@
 //! Borrowed, immutable scan-matching API.
 
-use crate::{icp, LaserData, LaserDataError, Params, SmResult};
+use crate::{
+    icp,
+    math::{Mat3, Matrix},
+    LaserData, LaserDataError, Params, SmResult,
+};
 
 /// A validated polar scan borrowed from caller-owned buffers.
 #[derive(Clone, Copy, Debug)]
@@ -100,6 +104,9 @@ pub struct MatchOutcome {
     pub iterations: i32,
     pub nvalid: i32,
     pub error: f64,
+    pub covariance: Option<Mat3>,
+    pub dx_dy_reference: Option<Matrix>,
+    pub dx_dy_sensor: Option<Matrix>,
 }
 
 impl From<SmResult> for MatchOutcome {
@@ -110,6 +117,9 @@ impl From<SmResult> for MatchOutcome {
             iterations: result.iterations,
             nvalid: result.nvalid,
             error: result.error,
+            covariance: result.cov_x,
+            dx_dy_reference: result.dx_dy1,
+            dx_dy_sensor: result.dx_dy2,
         }
     }
 }
