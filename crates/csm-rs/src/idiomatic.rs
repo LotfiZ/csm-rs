@@ -69,7 +69,6 @@ pub struct PreparedPolarScan {
 /// The scan buffers are owned by the workspace and can be updated in place
 /// between calls. Constructing it up front makes the intended steady-state
 /// ownership explicit for real-time and embedded callers.
-#[derive(Debug)]
 pub struct PreparedMatcher {
     matcher: Matcher,
     reference: PreparedPolarScan,
@@ -177,17 +176,21 @@ impl PreparedMatcher {
     }
 
     /// Match once and report the accepted result as a final snapshot.
-    pub fn match_once_traced<F: FnMut(IterationSnapshot)>(
+    pub fn match_once_traced<F: FnMut(IterationSnapshot) + 'static>(
         &mut self,
         mut observe: F,
     ) -> Result<MatchOutcome, LaserDataError> {
-        let outcome = self.match_once()?;
-        observe(IterationSnapshot {
-            iteration: outcome.iterations.max(0) as usize,
-            pose: outcome.pose,
-            error: outcome.error,
-            valid_correspondences: outcome.nvalid.max(0) as usize,
-        });
+        self.scratch.observer = Some(Box::new(move |iteration, pose, error, nvalid| {
+            observe(IterationSnapshot {
+                iteration,
+                pose,
+                error,
+                valid_correspondences: nvalid,
+            });
+        }));
+        let outcome = self.match_once();
+        self.scratch.observer = None;
+        let outcome = outcome?;
         Ok(outcome)
     }
 }
