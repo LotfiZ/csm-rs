@@ -76,7 +76,12 @@ pub(crate) fn sm_icp(
         laser_sens.visibility_test(&sensor_viewpoint);
     }
 
-    let outcome = icp_loop_with_restart(params, laser_ref, laser_sens);
+    let mut scratch = IcpScratch::new(
+        laser_ref.nrays,
+        laser_sens.nrays,
+        params.stopping.max_iterations.max(0) as usize,
+    );
+    let outcome = icp_loop_with_restart(params, laser_ref, laser_sens, &mut scratch);
     result.valid = outcome.success;
     result.x = outcome.x;
     result.error = outcome.error;
@@ -107,6 +112,26 @@ struct IcpOutcome {
     nvalid: i32,
 }
 
+/// Reusable buffers for the correspondence and outlier stages of ICP.
+#[derive(Debug)]
+pub(crate) struct IcpScratch {
+    hashes: Vec<u32>,
+    nearest_distances: Vec<f64>,
+    distances_by_sensor: Vec<f64>,
+    distances: Vec<f64>,
+}
+
+impl IcpScratch {
+    pub(crate) fn new(reference_rays: usize, sensor_rays: usize, max_iterations: usize) -> Self {
+        Self {
+            hashes: Vec::with_capacity(max_iterations),
+            nearest_distances: vec![0.0; reference_rays],
+            distances_by_sensor: vec![0.0; sensor_rays],
+            distances: Vec::with_capacity(sensor_rays),
+        }
+    }
+}
+
 /// Run ICP once, then try CSM's six local perturbations when the mean error is
 /// above the configured restart threshold.
 ///
@@ -115,8 +140,9 @@ fn icp_loop_with_restart(
     params: &Params,
     laser_ref: &LaserData,
     laser_sens: &mut LaserData,
+    scratch: &mut IcpScratch,
 ) -> IcpOutcome {
-    let initial = icp_loop(params, params.first_guess, laser_ref, laser_sens);
+    let initial = icp_loop(params, params.first_guess, laser_ref, laser_sens, scratch);
     if !initial.success {
         return initial;
     }
@@ -133,7 +159,7 @@ fn icp_loop_with_restart(
                 initial.x[1] + perturbation[1],
                 initial.x[2] + perturbation[2],
             ];
-            let candidate = icp_loop(params, start, laser_ref, laser_sens);
+            let candidate = icp_loop(params, start, laser_ref, laser_sens, scratch);
             if !candidate.success {
                 // C stops trying perturbations after the first failed restart,
                 // but still returns the best successful result so far.
@@ -183,6 +209,7 @@ fn icp_loop(
     initial_guess: [f64; 3],
     laser_ref: &LaserData,
     laser_sens: &mut LaserData,
+    scratch: &mut IcpScratch,
 ) -> IcpOutcome {
     let mut x_old = initial_guess;
     let mut x_new = x_old;
@@ -203,10 +230,8 @@ fn icp_loop(
     }
 
     let max_iterations = params.stopping.max_iterations.max(0) as usize;
-    let mut hashes = Vec::with_capacity(max_iterations);
-    let mut nearest_distances = vec![0.0; laser_ref.nrays];
-    let mut distances_by_sensor = vec![0.0; laser_sens.nrays];
-    let mut distances = Vec::with_capacity(laser_sens.nrays);
+    scratch.hashes.clear();
+    scratch.distances.clear();
     for iteration in 0..max_iterations {
         // C: `ld_compute_world_coords(laser_sens, x_old)`.
         laser_sens.compute_world_coords(&x_old);
@@ -226,14 +251,18 @@ fn icp_loop(
         // C: `kill_outliers_double()` followed by `kill_outliers_trim()` in
         // `sm/csm/icp/icp_loop.c`.
         if params.outliers.remove_doubles {
-            kill_outliers_double_with_scratch(laser_ref, laser_sens, &mut nearest_distances);
+            kill_outliers_double_with_scratch(
+                laser_ref,
+                laser_sens,
+                &mut scratch.nearest_distances,
+            );
         }
         let trimmed = kill_outliers_trim_with_scratch(
             &params.outliers,
             laser_ref,
             laser_sens,
-            &mut distances_by_sensor,
-            &mut distances,
+            &mut scratch.distances_by_sensor,
+            &mut scratch.distances,
         );
         let nvalid = trimmed.nvalid;
         if (nvalid as f64) < laser_sens.nrays as f64 * 0.05 {
@@ -277,9 +306,9 @@ fn icp_loop(
             .iter()
             .map(|corr| corr.valid.then_some((corr.j1, corr.j2)));
         let hash = corr_hash_iter(correspondence_keys);
-        let oscillating =
-            params.correspondence.metric == DistanceMetric::PointToLine && hashes.contains(&hash);
-        hashes.push(hash);
+        let oscillating = params.correspondence.metric == DistanceMetric::PointToLine
+            && scratch.hashes.contains(&hash);
+        scratch.hashes.push(hash);
         if oscillating {
             return IcpOutcome {
                 success: true,
