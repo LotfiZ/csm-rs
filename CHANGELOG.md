@@ -9,6 +9,7 @@
 - Added checked construction through `Matcher::try_new` and `Params::validate`.
 - Added fluent `Params::validated` configuration construction and complete
   numeric range checks.
+- Added explicit Cartesian beam angles with duplicate-bearing validation.
 - Added typed `MatchStatus` and covariance/derivative outputs.
 - Added a dependency-free interactive HTML visual example and idiomatic API examples.
 - Added Linux x86_64/aarch64 CI checks and an MSRV check.
