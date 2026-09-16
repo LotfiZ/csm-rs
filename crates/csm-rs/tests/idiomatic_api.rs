@@ -180,6 +180,14 @@ fn checked_matcher_constructor_rejects_invalid_params() {
 }
 
 #[test]
+fn uncertainty_helper_requires_all_diagnostics() {
+    let mut outcome = csm_rs::MatchOutcome::default();
+    assert!(!outcome.has_uncertainty());
+    outcome.covariance = Some(csm_rs::math::Mat3::new([[1.0, 0.0, 0.0]; 3]));
+    assert!(!outcome.has_uncertainty());
+}
+
+#[test]
 fn cartesian_match_preserves_points() {
     let points: Vec<[f64; 2]> = (0..21)
         .map(|i| {
