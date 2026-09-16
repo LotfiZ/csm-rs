@@ -138,10 +138,18 @@ and `workspace_bytes` support embedded integrations.
 
 ### Diagnostics
 
-`MatchOutcome::termination` identifies whether a match converged, reached the
-iteration limit, found no correspondences, or failed for another reason.
-`PreparedMatcher::match_once_traced` reports real ICP iteration snapshots
-(pose, error, and valid correspondences) for inspection.
+`MatchOutcome::termination` reports the algorithm's actual stop reason:
+convergence, iteration exhaustion, too few correspondences, insufficient usable
+geometry, cycle detection, numerical failure, or another failure.
+`MatchOutcome::accepted()` distinguishes an accepted convergence from a
+candidate produced by an unsuccessful termination, and
+`MatchOutcome::candidate()` exposes the candidate pose (or `None` when no
+candidate exists). Iteration counts, correspondence counts, and residual error
+are preserved after unsuccessful termination.
+
+A well-formed scan pair with insufficient usable geometry is an outcome, not a
+malformed-input error. `PreparedMatcher::match_once_traced` reports real ICP
+iteration snapshots (pose, error, and valid correspondences) for inspection.
 
 ### Examples
 

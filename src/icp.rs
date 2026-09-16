@@ -15,6 +15,7 @@ use crate::correspondence::{
 };
 use crate::covariance::compute_covariance_exact;
 use crate::laser_data::{LaserData, ScanError};
+use crate::matching::TerminationReason;
 use crate::math::{corr_hash_iter, ominus, pose_diff};
 use crate::params::DistanceMetric;
 use crate::params::Params;
@@ -30,7 +31,7 @@ pub(crate) fn sm_icp(
     laser_ref: &mut LaserData,
     laser_sens: &mut LaserData,
     result: &mut SmResult,
-) -> Result<(), ScanError> {
+) -> Result<TerminationReason, ScanError> {
     let mut scratch = IcpScratch::new(
         laser_ref.nrays,
         laser_sens.nrays,
@@ -46,7 +47,7 @@ pub(crate) fn sm_icp_with_scratch(
     laser_sens: &mut LaserData,
     result: &mut SmResult,
     scratch: &mut IcpScratch,
-) -> Result<(), ScanError> {
+) -> Result<TerminationReason, ScanError> {
     *result = SmResult::default();
 
     // C: `ld_valid_fields()` is checked before any input mutation.
@@ -98,7 +99,9 @@ pub(crate) fn sm_icp_with_scratch(
     result.x = outcome.x;
     result.error = outcome.error;
     result.iterations = outcome.iterations;
-    result.nvalid = if outcome.success { outcome.nvalid } else { 0 };
+    // Preserve the correspondence count even after an unsuccessful
+    // termination; callers use it as a diagnostic.
+    result.nvalid = outcome.nvalid;
 
     if outcome.success && params.do_compute_covariance {
         if let Some(covariance) = compute_covariance_exact(laser_ref, laser_sens, outcome.x) {
@@ -112,7 +115,7 @@ pub(crate) fn sm_icp_with_scratch(
         }
     }
 
-    Ok(())
+    Ok(outcome.termination)
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -122,6 +125,7 @@ struct IcpOutcome {
     error: f64,
     iterations: i32,
     nvalid: i32,
+    termination: TerminationReason,
 }
 
 /// Reusable buffers for the correspondence and outlier stages of ICP.
@@ -256,6 +260,7 @@ fn icp_loop(
             error: 0.0,
             iterations: 0,
             nvalid: 0,
+            termination: TerminationReason::NumericalFailure,
         };
     }
 
@@ -274,7 +279,12 @@ fn icp_loop(
                 x: x_new,
                 error: 0.0,
                 iterations: iteration as i32 + 1,
-                nvalid: 0,
+                nvalid: nvalid_before as i32,
+                termination: if nvalid_before == 0 {
+                    TerminationReason::NoCorrespondences
+                } else {
+                    TerminationReason::InsufficientGeometry
+                },
             };
         }
 
@@ -299,9 +309,14 @@ fn icp_loop(
             return IcpOutcome {
                 success: false,
                 x: x_new,
-                error: 0.0,
+                error: trimmed.total_error,
                 iterations: iteration as i32 + 1,
-                nvalid: 0,
+                nvalid: nvalid as i32,
+                termination: if nvalid == 0 {
+                    TerminationReason::NoCorrespondences
+                } else {
+                    TerminationReason::InsufficientGeometry
+                },
             };
         }
 
@@ -315,9 +330,10 @@ fn icp_loop(
             return IcpOutcome {
                 success: false,
                 x: x_new,
-                error: 0.0,
+                error: trimmed.total_error,
                 iterations: iteration as i32 + 1,
-                nvalid: 0,
+                nvalid: nvalid as i32,
+                termination: TerminationReason::NumericalFailure,
             };
         };
         x_new = next;
@@ -358,6 +374,7 @@ fn icp_loop(
                 error: best_error,
                 iterations: iteration as i32 + 1,
                 nvalid: best_nvalid,
+                termination: TerminationReason::CycleDetected,
             };
         }
 
@@ -368,6 +385,7 @@ fn icp_loop(
                 error,
                 iterations: iteration as i32 + 1,
                 nvalid: nvalid as i32,
+                termination: TerminationReason::Converged,
             };
         }
         x_old = x_new;
@@ -381,6 +399,7 @@ fn icp_loop(
         error: last_error,
         iterations: max_iterations as i32 + 1,
         nvalid: last_nvalid,
+        termination: TerminationReason::IterationLimit,
     }
 }
 
@@ -390,4 +409,42 @@ fn icp_loop(
 fn termination_criterion(params: &Params, delta: [f64; 3]) -> bool {
     let norm = (delta[0] * delta[0] + delta[1] * delta[1] + delta[2] * delta[2]).sqrt();
     norm < params.stopping.epsilon_xy && delta[2].abs() < params.stopping.epsilon_theta
+}
+
+#[cfg(test)]
+mod termination_tests {
+    use super::*;
+    use crate::params::Params;
+    use crate::result::SmResult;
+
+    fn polar_scan(n: usize, readings: impl Fn(usize) -> f64) -> LaserData {
+        let theta: Vec<f64> = (0..n)
+            .map(|i| -0.2 + 0.4 * i as f64 / (n - 1) as f64)
+            .collect();
+        let readings: Vec<f64> = (0..n).map(&readings).collect();
+        LaserData::from_polar(theta, readings, vec![true; n]).unwrap()
+    }
+
+    #[test]
+    fn insufficient_geometry_is_an_outcome_not_an_error() {
+        // Four of a hundred rays land within the correspondence distance.
+        let reference = polar_scan(100, |_| 5.0);
+        let mut reference = reference;
+        let mut sensor = polar_scan(100, |i| if i < 4 { 5.0 } else { 50.0 });
+        let mut params = Params::default();
+        params.correspondence.max_dist = 1.0;
+        let mut result = SmResult::default();
+        let termination = sm_icp(
+            &params,
+            [0.0; 3],
+            &mut reference,
+            &mut sensor,
+            &mut result,
+        )
+        .unwrap();
+        assert_eq!(termination, TerminationReason::InsufficientGeometry);
+        assert!(!result.valid);
+        assert!(result.nvalid > 0, "candidate diagnostics are preserved");
+    }
+
 }

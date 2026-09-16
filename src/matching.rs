@@ -234,7 +234,7 @@ impl PreparedMatcher {
     /// Match the current frames with an explicit initial pose.
     pub fn match_once_from(&mut self, guess: Pose) -> Result<MatchOutcome, ScanError> {
         let mut result = SmResult::default();
-        icp::sm_icp_with_scratch(
+        let termination = icp::sm_icp_with_scratch(
             &self.matcher.params,
             guess.to_array(),
             &mut self.reference.data,
@@ -242,7 +242,9 @@ impl PreparedMatcher {
             &mut result,
             &mut self.scratch,
         )?;
-        Ok(MatchOutcome::from(result).with_diagnostics(&self.matcher.params))
+        Ok(MatchOutcome::from(result)
+            .with_diagnostics(&self.matcher.params)
+            .with_termination(termination))
     }
 
     /// Match once and report the accepted result as a final snapshot.
@@ -310,10 +312,17 @@ pub enum TerminationReason {
     Failed,
     /// The pose correction fell below the configured thresholds.
     Converged,
-    /// Too few usable correspondences remained.
+    /// No usable correspondences were found.
     NoCorrespondences,
+    /// Some correspondences existed but fewer than the usable-geometry
+    /// threshold.
+    InsufficientGeometry,
     /// The configured iteration limit was reached.
     IterationLimit,
+    /// The correspondence set repeated, so the loop stopped on a cycle.
+    CycleDetected,
+    /// The linear solve failed (singular or non-finite system).
+    NumericalFailure,
 }
 
 impl MatchOutcome {
@@ -330,14 +339,15 @@ impl MatchOutcome {
         } else {
             CovarianceStatus::Failed
         };
-        self.termination = if self.valid {
-            TerminationReason::Converged
-        } else if self.nvalid == 0 {
-            TerminationReason::NoCorrespondences
-        } else if self.iterations >= params.stopping.max_iterations {
-            TerminationReason::IterationLimit
+        self
+    }
+
+    fn with_termination(mut self, termination: TerminationReason) -> Self {
+        self.termination = termination;
+        self.status = if self.valid && termination == TerminationReason::Converged {
+            MatchStatus::Converged
         } else {
-            TerminationReason::Failed
+            MatchStatus::Failed
         };
         self
     }
@@ -362,7 +372,22 @@ pub enum MatchStatus {
 
 impl MatchOutcome {
     pub fn converged(&self) -> bool {
-        self.status == MatchStatus::Converged
+        self.accepted()
+    }
+
+    /// Whether the result is an accepted convergence rather than a candidate
+    /// from an unsuccessful termination.
+    pub fn accepted(&self) -> bool {
+        self.valid && self.termination == TerminationReason::Converged
+    }
+
+    /// The candidate pose, if the matcher produced one.
+    ///
+    /// A candidate is always present for a well-formed request, including
+    /// unsuccessful terminations; `None` means no candidate was available
+    /// (for example a non-finite initial pose reaching the engine).
+    pub fn candidate(&self) -> Option<Pose> {
+        self.pose.is_finite().then_some(self.pose)
     }
 }
 
@@ -543,14 +568,16 @@ impl Matcher {
             return Err(ScanError::NonFiniteGuess);
         }
         let mut result = SmResult::default();
-        icp::sm_icp(
+        let termination = icp::sm_icp(
             &self.params,
             guess.to_array(),
             reference,
             sensor,
             &mut result,
         )?;
-        Ok(MatchOutcome::from(result).with_diagnostics(&self.params))
+        Ok(MatchOutcome::from(result)
+            .with_diagnostics(&self.params)
+            .with_termination(termination))
     }
 }
 
