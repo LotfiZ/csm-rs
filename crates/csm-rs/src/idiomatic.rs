@@ -74,6 +74,7 @@ pub struct PreparedMatcher {
     matcher: Matcher,
     reference: PreparedPolarScan,
     sensor: PreparedPolarScan,
+    scratch: icp::IcpScratch,
 }
 
 impl PreparedMatcher {
@@ -85,10 +86,16 @@ impl PreparedMatcher {
         if reference.is_empty() || sensor.is_empty() {
             return Err(LaserDataError::NraysOutOfRange);
         }
+        let scratch = icp::IcpScratch::new(
+            reference.len(),
+            sensor.len(),
+            matcher.params.stopping.max_iterations.max(0) as usize,
+        );
         Ok(Self {
             matcher,
             reference,
             sensor,
+            scratch,
         })
     }
 
@@ -106,8 +113,15 @@ impl PreparedMatcher {
     }
 
     pub fn match_once(&mut self) -> Result<MatchOutcome, LaserDataError> {
-        self.matcher
-            .match_prepared(&mut self.reference, &mut self.sensor)
+        let mut result = SmResult::default();
+        icp::sm_icp_with_scratch(
+            &self.matcher.params,
+            &mut self.reference.data,
+            &mut self.sensor.data,
+            &mut result,
+            &mut self.scratch,
+        )?;
+        Ok(result.into())
     }
 }
 

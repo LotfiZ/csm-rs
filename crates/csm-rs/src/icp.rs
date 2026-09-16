@@ -30,6 +30,21 @@ pub(crate) fn sm_icp(
     laser_sens: &mut LaserData,
     result: &mut SmResult,
 ) -> Result<(), LaserDataError> {
+    let mut scratch = IcpScratch::new(
+        laser_ref.nrays,
+        laser_sens.nrays,
+        params.stopping.max_iterations.max(0) as usize,
+    );
+    sm_icp_with_scratch(params, laser_ref, laser_sens, result, &mut scratch)
+}
+
+pub(crate) fn sm_icp_with_scratch(
+    params: &Params,
+    laser_ref: &mut LaserData,
+    laser_sens: &mut LaserData,
+    result: &mut SmResult,
+    scratch: &mut IcpScratch,
+) -> Result<(), LaserDataError> {
     *result = SmResult::default();
 
     // C: `ld_valid_fields()` is checked before any input mutation.
@@ -76,12 +91,7 @@ pub(crate) fn sm_icp(
         laser_sens.visibility_test(&sensor_viewpoint);
     }
 
-    let mut scratch = IcpScratch::new(
-        laser_ref.nrays,
-        laser_sens.nrays,
-        params.stopping.max_iterations.max(0) as usize,
-    );
-    let outcome = icp_loop_with_restart(params, laser_ref, laser_sens, &mut scratch);
+    let outcome = icp_loop_with_restart(params, laser_ref, laser_sens, scratch);
     result.valid = outcome.success;
     result.x = outcome.x;
     result.error = outcome.error;
