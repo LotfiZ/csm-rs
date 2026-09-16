@@ -17,8 +17,9 @@
 //!
 //! ## Licensing
 //!
-//! Derivative work of CSM (LGPLv3) and its vendored `gpc` solver (GPLv2+);
-//! this crate is therefore `LGPL-3.0-only OR GPL-2.0-or-later`.
+//! Derivative work of CSM (LGPLv3) and its vendored `gpc` solver (GPLv2+).
+//! Because the GPL-derived solver is part of this combined crate, distribution
+//! is currently under GPL-2.0-or-later; see the repository NOTICE.md.
 
 pub mod correspondence;
 pub mod covariance;
