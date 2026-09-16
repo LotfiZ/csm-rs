@@ -361,6 +361,15 @@ impl Matcher {
         &self.params
     }
 
+    /// Build a reusable workspace from two owned, fixed-shape scans.
+    pub fn prepare(
+        &self,
+        reference: PreparedPolarScan,
+        sensor: PreparedPolarScan,
+    ) -> Result<PreparedMatcher, LaserDataError> {
+        PreparedMatcher::new(self.clone(), reference, sensor)
+    }
+
     /// Match two borrowed polar scans without modifying caller buffers.
     pub fn match_polar(
         &self,
