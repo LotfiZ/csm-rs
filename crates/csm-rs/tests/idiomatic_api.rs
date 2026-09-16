@@ -79,6 +79,20 @@ fn prepared_scan_updates_without_changing_shape() {
 }
 
 #[test]
+fn prepared_scan_reports_capacity_overflow() {
+    let angles: Vec<f64> = (0..21).map(|i| -1.0 + i as f64 * 0.1).collect();
+    let mut scan = PreparedPolarScan::from_polar(angles, vec![8.0; 21], vec![true; 21]).unwrap();
+    let error = scan.update(&vec![8.0; 22], &vec![true; 22]).unwrap_err();
+    assert_eq!(
+        error,
+        csm_rs::LaserDataError::CapacityExceeded {
+            capacity: 21,
+            requested: 22,
+        }
+    );
+}
+
+#[test]
 fn prepared_cartesian_constructor_matches() {
     let points: Vec<[f64; 2]> = (0..21)
         .map(|i| {
