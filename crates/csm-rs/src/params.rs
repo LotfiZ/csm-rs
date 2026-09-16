@@ -211,12 +211,26 @@ pub struct Params {
     /// Robot's laser pose (used by `sm_icp_xy`, not `sm_icp`).
     /// C: `laser[3]` = laser_x, laser_y, laser_theta (all default 0.0)
     pub laser_pose: [f64; 3],
+    /// Sensor reading interval applied before correspondence search.
+    /// C: `min_reading`, `max_reading`
     pub reading_bounds: ReadingBounds,
+    /// Maximum translation and rotation allowed for one correction.
+    /// C: `max_angular_correction_deg`, `max_linear_correction`
     pub correction_limits: CorrectionLimits,
+    /// Iteration limit and pose-delta stopping thresholds.
+    /// C: `max_iterations`, `epsilon_xy`, `epsilon_theta`
     pub stopping: StoppingCriteria,
+    /// Correspondence strategy, metric, alpha, visibility, and orientation
+    /// settings. C: the corresponding fields of `struct sm_params`.
     pub correspondence: CorrespondenceParams,
+    /// Duplicate and percentile/adaptive correspondence rejection settings.
+    /// C: `outliers_maxPerc`, `outliers_adaptive_order`,
+    /// `outliers_adaptive_mult`, `outliers_remove_doubles`
     pub outliers: OutlierParams,
+    /// Six-perturbation restart settings. C: `restart*`
     pub restart: RestartParams,
+    /// ML and per-ray sigma weighting switches.
+    /// C: `use_ml_weights`, `use_sigma_weights`
     pub weights: WeightParams,
     /// C: `do_compute_covariance` (default 0)
     pub do_compute_covariance: bool,

@@ -13,20 +13,30 @@
 /// C: raw `gsl_matrix` 2×2 usage in `sm/lib/gpc/gpc.c`
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Mat2 {
+    /// Row-major matrix entries. C: `gsl_matrix` elements in `gpc.c`
     pub data: [[f64; 2]; 2],
 }
 
 impl Mat2 {
+    /// Construct a 2×2 matrix from row-major entries.
+    ///
+    /// C: 2×2 `gsl_matrix` initialization in `sm/lib/gpc/gpc.c`
     pub fn new(data: [[f64; 2]; 2]) -> Self {
         Self { data }
     }
 
+    /// Return the transpose of this matrix.
+    ///
+    /// C: `gsl_matrix_transpose_memcpy()` usage in `sm/lib/gpc/gpc.c`
     pub fn transpose(&self) -> Self {
         Self::new(std::array::from_fn(|r| {
             std::array::from_fn(|c| self.data[c][r])
         }))
     }
 
+    /// Multiply this matrix by `other`.
+    ///
+    /// C: `gsl_blas_dgemm()` usage in `sm/lib/gpc/gpc.c`
     pub fn mul(&self, other: &Mat2) -> Mat2 {
         let (a, b) = (self.data, other.data);
         Mat2::new([
@@ -63,10 +73,14 @@ impl Mat2 {
 /// C: egsl 3×3 usage in `sm/csm/icp/icp_covariance.c`
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Mat3 {
+    /// Row-major matrix entries. C: 3×3 `gsl_matrix` elements in CSM
     pub data: [[f64; 3]; 3],
 }
 
 impl Mat3 {
+    /// Construct a 3×3 matrix from row-major entries.
+    ///
+    /// C: 3×3 matrix initialization in `sm/csm/icp/icp_covariance.c`
     pub fn new(data: [[f64; 3]; 3]) -> Self {
         Self { data }
     }
@@ -80,12 +94,18 @@ impl Mat3 {
         }))
     }
 
+    /// Return the transpose of this matrix.
+    ///
+    /// C: matrix transpose operations in `sm/csm/icp/icp_covariance.c`
     pub fn transpose(&self) -> Self {
         Self::new(std::array::from_fn(|r| {
             std::array::from_fn(|c| self.data[c][r])
         }))
     }
 
+    /// Multiply this matrix by `other`.
+    ///
+    /// C: matrix multiplication operations in `sm/csm/icp/icp_covariance.c`
     pub fn mul(&self, other: &Mat3) -> Mat3 {
         let (a, b) = (self.data, other.data);
         Mat3::new(std::array::from_fn(|r| {
@@ -94,6 +114,8 @@ impl Mat3 {
     }
 
     /// Closed-form inverse via cofactor expansion; `None` if singular.
+    ///
+    /// C: 3×3 inverse operations in `sm/csm/icp/icp_covariance.c`
     pub fn inv(&self) -> Option<Mat3> {
         let a = self.data;
         let c00 = a[1][1] * a[2][2] - a[1][2] * a[2][1];
@@ -162,20 +184,30 @@ impl Matrix {
 /// C: raw `gsl_matrix` 4×4 usage in `sm/lib/gpc/gpc.c`
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Mat4 {
+    /// Row-major matrix entries. C: 4×4 `gsl_matrix` elements in `gpc.c`
     pub data: [[f64; 4]; 4],
 }
 
 impl Mat4 {
+    /// Construct a 4×4 matrix from row-major entries.
+    ///
+    /// C: 4×4 normal-equation matrix initialization in `sm/lib/gpc/gpc.c`
     pub fn new(data: [[f64; 4]; 4]) -> Self {
         Self { data }
     }
 
+    /// Return the transpose of this matrix.
+    ///
+    /// C: transpose operations in `sm/lib/gpc/gpc.c`
     pub fn transpose(&self) -> Self {
         Self::new(std::array::from_fn(|r| {
             std::array::from_fn(|c| self.data[c][r])
         }))
     }
 
+    /// Multiply this matrix by `other`.
+    ///
+    /// C: `gsl_blas_dgemm()` usage in `sm/lib/gpc/gpc.c`
     pub fn mul(&self, other: &Mat4) -> Mat4 {
         let (a, b) = (self.data, other.data);
         Mat4::new(std::array::from_fn(|r| {
@@ -185,6 +217,8 @@ impl Mat4 {
 
     /// Solve `A·x = b` via LU decomposition with partial pivoting;
     /// `None` if singular.
+    ///
+    /// C: the 4×4 normal-equation solve in `sm/lib/gpc/gpc.c`
     pub fn solve(&self, b: [f64; 4]) -> Option<[f64; 4]> {
         let mut a = self.data;
         let mut x = b;
