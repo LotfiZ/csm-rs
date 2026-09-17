@@ -197,6 +197,23 @@ cargo run --release -p csm-rs --example benchmark_prepared
 For a repeatable release resource report (optimized example sizes plus the
 prepared latency benchmark), run `scripts/measure-release.sh`.
 
+## Performance and measurements
+
+Resource measurements are reproducible and separated from correctness tests:
+
+```sh
+./scripts/measure-release.sh          # environment, build sizes, latency/allocation/memory/alignment
+cargo run --release -p csm-rs --example measure
+```
+
+The report measures preparation and matching separately, reports latency
+percentiles (including p99), counts steady-state heap allocations, reports
+memory and alignment quality, and records the seed, hardware, toolchain, build
+settings, revision, and commands. See [docs/measurements.md](docs/measurements.md)
+for the method, the latest recorded run, and the assessment against the
+provisional target. No claim of outperforming the C implementation is made
+without comparable measurements.
+
 ## Capability coverage
 
 The retained CSM capabilities are covered by two reproducible suites:
