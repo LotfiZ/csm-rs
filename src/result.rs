@@ -32,6 +32,8 @@ pub struct SmResult {
     /// d(x)/d(y2), for covariance propagation. One column per sensor ray.
     /// C: `dx_dy2_m`
     pub dx_dy2: Option<Matrix>,
+    /// Fisher information (Hessian of the point-to-line objective).
+    pub fisher: Option<Mat3>,
 }
 
 #[cfg(test)]

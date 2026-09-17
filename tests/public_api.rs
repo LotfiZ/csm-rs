@@ -598,3 +598,40 @@ fn prepared_matching_supports_large_and_independently_sized_scans() {
     assert_eq!(workspace.capacities(), (3_500, 200));
     assert!(workspace.match_once().unwrap().valid);
 }
+
+#[test]
+fn uncertainty_failure_is_independent_of_pose_status() {
+    // The engine reports uncertainty failure separately from pose status; a
+    // usable, accepted pose must remain usable when covariance cannot be
+    // produced.
+    let outcome = csm_rs::MatchOutcome {
+        valid: true,
+        termination: TerminationReason::Converged,
+        covariance_status: CovarianceStatus::Failed,
+        ..csm_rs::MatchOutcome::default()
+    };
+    assert!(outcome.accepted());
+    assert!(outcome.candidate().is_some());
+    assert!(!outcome.has_uncertainty());
+    assert_eq!(outcome.covariance_status, CovarianceStatus::Failed);
+}
+
+#[test]
+fn uncertainty_includes_fisher_information() {
+    let (angles, readings, valid) = polar(41, 0.0);
+    let reference = PolarScan::new(&angles, &readings, &valid).unwrap();
+    let sensor = PolarScan::new(&angles, &readings, &valid).unwrap();
+    let params = Params {
+        do_compute_covariance: true,
+        ..Params::default()
+    };
+    let outcome = Matcher::new(params)
+        .unwrap()
+        .match_polar(reference, sensor)
+        .unwrap();
+    assert_eq!(outcome.covariance_status, CovarianceStatus::Computed);
+    assert!(outcome.covariance.is_some());
+    assert!(outcome.fisher_information.is_some());
+    assert!(outcome.dx_dy_reference.is_some() && outcome.dx_dy_sensor.is_some());
+    assert!(outcome.has_uncertainty());
+}

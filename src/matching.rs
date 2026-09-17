@@ -376,6 +376,19 @@ impl PreparedMatcher {
 
     /// Match the current frames with an explicit initial pose.
     pub fn match_once_from(&mut self, guess: Pose) -> Result<MatchOutcome, ScanError> {
+        let mut outcome = MatchOutcome::default();
+        self.match_once_from_into(guess, &mut outcome)?;
+        Ok(outcome)
+    }
+
+    /// Match into caller-owned outcome storage, reusing its uncertainty
+    /// buffers so repeated matching performs no heap allocation after the
+    /// caller has reserved them with [`MatchOutcome::reserve_uncertainty`].
+    pub fn match_once_from_into(
+        &mut self,
+        guess: Pose,
+        outcome: &mut MatchOutcome,
+    ) -> Result<(), ScanError> {
         self.reference.prepare_for_match();
         self.sensor.prepare_for_match();
         let mut result = SmResult::default();
@@ -387,9 +400,36 @@ impl PreparedMatcher {
             &mut result,
             &mut self.scratch,
         )?;
-        Ok(MatchOutcome::from(result)
-            .with_diagnostics(&self.matcher.params)
-            .with_termination(termination))
+        let params = &self.matcher.params;
+        let covariance = self.scratch.covariance;
+        let fisher = self.scratch.fisher;
+        let mut filled = MatchOutcome::from(result)
+            .with_termination(termination);
+        filled.covariance = covariance;
+        filled.fisher_information = fisher;
+        filled.covariance_status = if !params.do_compute_covariance {
+            CovarianceStatus::Disabled
+        } else if covariance.is_some() {
+            CovarianceStatus::Computed
+        } else {
+            CovarianceStatus::Failed
+        };
+        if covariance.is_some() {
+            copy_matrix_into(&mut outcome.dx_dy_reference, &self.scratch.cov_dx_dy1);
+            copy_matrix_into(&mut outcome.dx_dy_sensor, &self.scratch.cov_dx_dy2);
+        } else {
+            outcome.dx_dy_reference = None;
+            outcome.dx_dy_sensor = None;
+        }
+        filled.dx_dy_reference = outcome.dx_dy_reference.take();
+        filled.dx_dy_sensor = outcome.dx_dy_sensor.take();
+        *outcome = filled;
+        Ok(())
+    }
+
+    /// Match with the identity initial pose into caller-owned storage.
+    pub fn match_into(&mut self, outcome: &mut MatchOutcome) -> Result<(), ScanError> {
+        self.match_once_from_into(Pose::IDENTITY, outcome)
     }
 
     /// Match once and report the accepted result as a final snapshot.
@@ -432,6 +472,8 @@ pub struct MatchOutcome {
     pub covariance: Option<Mat3>,
     pub dx_dy_reference: Option<Matrix>,
     pub dx_dy_sensor: Option<Matrix>,
+    /// Hessian of the point-to-line objective (Fisher information).
+    pub fisher_information: Option<Mat3>,
     pub covariance_status: CovarianceStatus,
     pub termination: TerminationReason,
 }
@@ -473,7 +515,23 @@ pub enum TerminationReason {
 impl MatchOutcome {
     /// Whether covariance and both derivative matrices were produced.
     pub fn has_uncertainty(&self) -> bool {
-        self.covariance.is_some() && self.dx_dy_reference.is_some() && self.dx_dy_sensor.is_some()
+        self.covariance.is_some()
+            && self.dx_dy_reference.is_some()
+            && self.dx_dy_sensor.is_some()
+            && self.fisher_information.is_some()
+    }
+
+    /// Reserve derivative-matrix storage so [`PreparedMatcher::match_into`]
+    /// can fill uncertainty outputs without allocating.
+    pub fn reserve_uncertainty(&mut self, reference_rays: usize, sensor_rays: usize) {
+        match &mut self.dx_dy_reference {
+            Some(matrix) => matrix.reset(3, reference_rays),
+            None => self.dx_dy_reference = Some(Matrix::zeros(3, reference_rays)),
+        }
+        match &mut self.dx_dy_sensor {
+            Some(matrix) => matrix.reset(3, sensor_rays),
+            None => self.dx_dy_sensor = Some(Matrix::zeros(3, sensor_rays)),
+        }
     }
 
     fn with_diagnostics(mut self, params: &Params) -> Self {
@@ -552,6 +610,7 @@ impl From<SmResult> for MatchOutcome {
             covariance: result.cov_x,
             dx_dy_reference: result.dx_dy1,
             dx_dy_sensor: result.dx_dy2,
+            fisher_information: result.fisher,
             covariance_status: CovarianceStatus::Disabled,
             termination: TerminationReason::Failed,
         }
@@ -734,4 +793,13 @@ impl Matcher {
 fn cartesian_to_laser(scan: CartesianScan<'_>) -> Result<LaserData, ScanError> {
     let (angles, readings) = scan.to_polar_parts();
     LaserData::from_polar(angles, readings, scan.valid().to_vec())
+}
+
+/// Copy `source` into a reusable matrix slot, allocating only when the slot
+/// was never reserved.
+fn copy_matrix_into(slot: &mut Option<Matrix>, source: &Matrix) {
+    match slot {
+        Some(matrix) => matrix.copy_from(source),
+        None => *slot = Some(source.clone()),
+    }
 }
