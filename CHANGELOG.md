@@ -50,6 +50,9 @@
   sessions, and replaying them by rerunning the matcher, with clear malformed
   input and unsupported-version errors
   ([#47](https://github.com/LotfiZ/csm-rs/issues/47)).
+- Add reproducible latency (including p99), allocation, memory, alignment, and
+  build-size measurements with recorded workloads, environment, and commands
+  ([#48](https://github.com/LotfiZ/csm-rs/issues/48)).
 - Documented the coordinate contract: metres, radians, scan ordering, sensor
   origin, and the sensor-to-reference transform composition.
 - Retained `PreparedPolarScan`/`PreparedMatcher` reusable storage and optional
