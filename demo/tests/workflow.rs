@@ -208,3 +208,118 @@ async fn iteration_tracing_is_opt_in_and_agrees_with_plain_matching() {
     }
     assert_eq!(traced.termination, plain.termination);
 }
+
+async fn post_raw(path: &str, body: serde_json::Value) -> (u16, String) {
+    let request = axum::http::Request::builder()
+        .method("POST")
+        .uri(path)
+        .header("content-type", "application/json")
+        .body(Body::from(body.to_string()))
+        .expect("request");
+    let response = app().oneshot(request).await.expect("router call");
+    let status = response.status().as_u16();
+    let bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .expect("body");
+    (status, String::from_utf8_lossy(&bytes).into_owned())
+}
+
+fn sample_pair() -> serde_json::Value {
+    let angles: Vec<f64> = (0..61).map(|i| -1.5 + i as f64 * 0.05).collect();
+    let readings: Vec<f64> = angles.iter().map(|a| 6.0 + 0.5 * (3.0 * a).sin()).collect();
+    json!({
+        "format": "csm-rs-scan-pair",
+        "version": 1,
+        "initial_guess": [0.0, 0.0, 0.0],
+        "reference": { "kind": "polar", "angles": angles, "readings": readings, "valid": vec![true; 61] },
+        "sensor": { "kind": "polar", "angles": angles, "readings": readings, "valid": vec![true; 61] },
+    })
+}
+
+#[tokio::test]
+async fn imports_a_valid_polar_pair_without_ground_truth() {
+    let (status, body) = post_raw("/api/import", sample_pair()).await;
+    assert_eq!(status, 200, "{body}");
+    let response: csm_rs_demo::ImportResponse = serde_json::from_str(&body).unwrap();
+    assert!(response.valid);
+    assert!(!response.reference.is_empty());
+    // No ground-truth field exists on the response at all.
+    let value: serde_json::Value = serde_json::from_str(&body).unwrap();
+    assert!(value.get("truth_pose").is_none());
+}
+
+#[tokio::test]
+async fn imports_a_cartesian_pair() {
+    let angles: Vec<f64> = (0..61).map(|i| -1.5 + i as f64 * 0.05).collect();
+    let points: Vec<[f64; 2]> = angles
+        .iter()
+        .map(|a| {
+            let r = 6.0 + 0.5 * (3.0 * a).sin();
+            [r * a.cos(), r * a.sin()]
+        })
+        .collect();
+    let pair = json!({
+        "format": "csm-rs-scan-pair",
+        "version": 1,
+        "reference": { "kind": "cartesian", "points": points, "valid": vec![true; 61] },
+        "sensor": { "kind": "cartesian", "points": points, "valid": vec![true; 61] },
+    });
+    let (status, body) = post_raw("/api/import", pair).await;
+    assert_eq!(status, 200, "{body}");
+}
+
+#[tokio::test]
+async fn malformed_imports_are_rejected_clearly() {
+    let mut mismatched = sample_pair();
+    mismatched["sensor"]["readings"] = json!(vec![1.0; 60]);
+    let (status, body) = post_raw("/api/import", mismatched).await;
+    assert_eq!(status, 400);
+    assert!(body.to_lowercase().contains("length"), "{body}");
+
+    // A null reading on a valid ray is malformed input.
+    let mut invalid_missing = sample_pair();
+    invalid_missing["sensor"]["readings"][3] = serde_json::Value::Null;
+    let (status, body) = post_raw("/api/import", invalid_missing).await;
+    assert_eq!(status, 400);
+    assert!(body.to_lowercase().contains("missing"), "{body}");
+
+    // Missing returns (null + valid=false) are accepted.
+    let mut missing = sample_pair();
+    missing["sensor"]["readings"][3] = serde_json::Value::Null;
+    missing["sensor"]["valid"][3] = json!(false);
+    let (status, _) = post_raw("/api/import", missing).await;
+    assert_eq!(status, 200);
+
+    let mut unsupported = sample_pair();
+    unsupported["version"] = json!(2);
+    let (status, body) = post_raw("/api/import", unsupported).await;
+    assert_eq!(status, 400);
+    assert!(body.contains("version"), "{body}");
+}
+
+#[tokio::test]
+async fn export_replay_round_trips() {
+    let (status, body) = post_raw("/api/export", json!({ "step": 5, "seed": 42 })).await;
+    assert_eq!(status, 200, "{body}");
+    let record: serde_json::Value = serde_json::from_str(&body).unwrap();
+    assert_eq!(record["version"], 1);
+    assert!(record["result"]["estimated_pose"].is_array());
+
+    let (status, replay_body) = post_raw("/api/replay", record.clone()).await;
+    assert_eq!(status, 200, "{replay_body}");
+    let replay: serde_json::Value = serde_json::from_str(&replay_body).unwrap();
+    let stored = &record["result"]["estimated_pose"];
+    for i in 0..3 {
+        let delta = (replay["estimated_pose"][i].as_f64().unwrap()
+            - stored[i].as_f64().unwrap())
+        .abs();
+        assert!(delta < 1e-9, "replay diverged at {i}: {delta}");
+    }
+
+    // Unsupported versions are rejected clearly.
+    let mut future = record;
+    future["version"] = json!(2);
+    let (status, body) = post_raw("/api/replay", future).await;
+    assert_eq!(status, 400);
+    assert!(body.contains("version"), "{body}");
+}

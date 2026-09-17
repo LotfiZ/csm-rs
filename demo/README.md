@@ -72,6 +72,56 @@ allocated only when tracing is enabled.
   cannot overwrite a newer one.
 - Public hosting and WebAssembly are intentionally out of scope.
 
+## Import, export, and replay
+
+Imported data has **no ground truth**: responses show the matcher result and
+never fabricate a true pose.
+
+### Import format (`csm-rs-scan-pair`, version 1)
+
+```json
+{
+  "format": "csm-rs-scan-pair",
+  "version": 1,
+  "initial_guess": [0.0, 0.0, 0.0],
+  "reference": {
+    "kind": "polar",
+    "angles": [-1.0, -0.9, ...],
+    "readings": [5.0, null, ...],
+    "valid": [true, false, ...],
+    "sigma": null,
+    "true_alpha": null
+  },
+  "sensor": {
+    "kind": "cartesian",
+    "points": [[8.0, 0.0], ...],
+    "valid": [true, ...],
+    "angles": null
+  },
+  "config": { "max_iterations": 200 }
+}
+```
+
+- Polar rays are ordered by bearing in radians; readings are metres; `null`
+  marks a missing return and `valid` must be `false` there. A `null` reading on
+  a valid ray is rejected.
+- Cartesian points are ordered by bearing; `angles` may supply explicit
+  bearings, otherwise `atan2(y, x)` is derived.
+- `sigma` and `true_alpha` are optional per-ray arrays for the weighting paths.
+- `config` optionally overrides matching settings; simulation-only fields are
+  ignored.
+
+Malformed input returns HTTP 400 with a clear message. The **sample** button
+loads a minimal valid document.
+
+### Export and replay
+
+**Export** packages a versioned session containing the generated scans, the
+initial guess, the matching configuration, the simulation seed, and the
+matching result. **Replay** reruns the matcher on the stored scans and compares
+its result with the stored one under the same reproducibility rules; an
+unsupported version is rejected clearly.
+
 ## Out of scope
 
 Direct sensor connections, ROS integration, log-format support, and public

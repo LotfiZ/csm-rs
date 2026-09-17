@@ -199,6 +199,17 @@ pub fn initial_guess(truth: Pose, error: f64, rng: &mut Rng) -> Pose {
     )
 }
 
+/// Matching result stored in an exported session.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct SessionResult {
+    pub estimated_pose: [f64; 3],
+    pub valid: bool,
+    pub termination: String,
+    pub iterations: i32,
+    pub nvalid: i32,
+    pub error: f64,
+}
+
 /// A versioned export of a frame request for replay.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[allow(dead_code)] // used by the import/export/replay stage
@@ -216,4 +227,5 @@ pub struct SessionRecord {
     pub sensor_readings: Vec<Option<f64>>,
     pub sensor_valid: Vec<bool>,
     pub initial_guess: [f64; 3],
+    pub result: SessionResult,
 }

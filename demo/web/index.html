@@ -91,6 +91,18 @@
       <input id="seed" type="number" value="7">
 
       <details>
+        <summary>import / export / replay sessions</summary>
+        <div class="row">
+          <button id="export">export</button>
+          <button id="doimport">import</button>
+          <button id="replay">replay</button>
+          <button id="sample">sample</button>
+        </div>
+        <textarea id="session" rows="8" spellcheck="false" style="width:100%;background:#0b1220;color:#e5e7eb;border:1px solid #374151;border-radius:6px;font-family:ui-monospace,monospace;font-size:.78rem"></textarea>
+        <p id="io-status" class="muted"></p>
+      </details>
+
+      <details>
         <summary>advanced matching configuration</summary>
         <label>search</label>
         <select id="search">
@@ -251,6 +263,30 @@ function render(d) {
     : 'Fixed-reference mode matches every frame against the initial reference, so it does not accumulate drift.';
 }
 
+function renderImport(d) {
+  extent = d.extent;
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  drawPoints(d.reference, '#60a5fa', 2.4);
+  drawPoints(d.sensor_unaligned, '#f472b6', 2.0);
+  drawPoints(d.sensor_aligned, '#34d399', 2.4);
+  arrow(d.estimated_pose[0], d.estimated_pose[1], d.estimated_pose[2], '#34d399');
+  $('s-truth').textContent = '-';
+  $('s-reltruth').textContent = '-';
+  $('s-relest').textContent = '-';
+  $('s-drift').textContent = '-';
+  $('s-est').textContent = fmt(d.estimated_pose);
+  $('s-term').textContent = d.termination;
+  $('s-iter').textContent = d.iterations;
+  $('s-nvalid').textContent = d.nvalid;
+  $('s-error').textContent = d.error.toFixed(5);
+  $('s-cov').textContent = d.covariance_status;
+  const label = d.accepted ? 'accepted convergence' : (d.valid ? 'candidate (not accepted)' : 'unsuccessful');
+  $('s-status').textContent = label;
+  $('s-status').className = d.accepted ? 'ok' : (d.valid ? 'warn' : 'bad');
+  $('s-time').textContent = 'imported pair';
+  $('drift-note').textContent = 'Imported data has no ground truth; the matcher result is shown without one.';
+}
+
 function fmt(p) { return `(${p[0].toFixed(3)}, ${p[1].toFixed(3)}, ${p[2].toFixed(3)})`; }
 
 function setPlaying(value) {
@@ -275,6 +311,49 @@ for (const id of ['scenario', 'reference_mode', 'seed', 'search', 'metric', 'max
   $(id).addEventListener('change', () => { step = 0; request(); });
 }
 $('iteration').addEventListener('input', () => { if (latest) render(latest); });
+
+async function postJson(path, body) {
+  const response = await fetch(path, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
+  const text = await response.text();
+  if (!response.ok) throw new Error(text || `HTTP ${response.status}`);
+  return JSON.parse(text);
+}
+
+$('export').onclick = () => {
+  postJson('/api/export', config(0))
+    .then((data) => { $('session').value = JSON.stringify(data, null, 2); $('io-status').textContent = 'session exported'; })
+    .catch((error) => { $('io-status').textContent = `export failed: ${error.message}`; });
+};
+$('doimport').onclick = () => {
+  try {
+    postJson('/api/import', JSON.parse($('session').value))
+      .then((data) => { renderImport(data); $('io-status').textContent = 'import matched'; })
+      .catch((error) => { $('io-status').textContent = `import rejected: ${error.message}`; });
+  } catch (error) {
+    $('io-status').textContent = `import rejected: ${error.message}`;
+  }
+};
+$('replay').onclick = () => {
+  try {
+    postJson('/api/replay', JSON.parse($('session').value))
+      .then((data) => { renderImport(data); $('io-status').textContent = 'replay matched and agreed'; })
+      .catch((error) => { $('io-status').textContent = `replay failed: ${error.message}`; });
+  } catch (error) {
+    $('io-status').textContent = `replay failed: ${error.message}`;
+  }
+};
+$('sample').onclick = () => {
+  const angles = Array.from({ length: 61 }, (_, i) => -1.5 + i * 0.05);
+  const readings = angles.map((a) => 6 + 0.5 * Math.sin(3 * a));
+  $('session').value = JSON.stringify({
+    format: 'csm-rs-scan-pair',
+    version: 1,
+    initial_guess: [0, 0, 0],
+    reference: { kind: 'polar', angles, readings, valid: readings.map(() => true) },
+    sensor: { kind: 'polar', angles, readings, valid: readings.map(() => true) },
+  }, null, 2);
+  $('io-status').textContent = 'sample format loaded';
+};
 for (const id of ['motion', 'noise', 'dropout', 'initial_error']) {
   $(id).addEventListener('input', () => { syncOutputs(); request(); });
 }

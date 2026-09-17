@@ -46,6 +46,10 @@
   residuals, and restart context; let the browser inspect iterations, and show
   instrumented timing separately from ordinary matching
   ([#46](https://github.com/LotfiZ/csm-rs/issues/46)).
+- Support importing ordered polar/Cartesian scan pairs, exporting versioned
+  sessions, and replaying them by rerunning the matcher, with clear malformed
+  input and unsupported-version errors
+  ([#47](https://github.com/LotfiZ/csm-rs/issues/47)).
 - Documented the coordinate contract: metres, radians, scan ordering, sensor
   origin, and the sensor-to-reference transform composition.
 - Retained `PreparedPolarScan`/`PreparedMatcher` reusable storage and optional
