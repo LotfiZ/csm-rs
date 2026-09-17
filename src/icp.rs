@@ -166,12 +166,31 @@ pub(crate) struct IcpScratch {
     /// Covariance and Fisher information produced by the last match.
     pub(crate) covariance: Option<Mat3>,
     pub(crate) fisher: Option<Mat3>,
-    pub(crate) observer: IterationObserver,
-    pub(crate) trace_events: Vec<(usize, [f64; 3], f64, usize)>,
+    pub(crate) trace_events: Vec<TraceEvent>,
     pub(crate) trace_enabled: bool,
 }
 
-type IterationObserver = Option<Box<dyn FnMut(usize, [f64; 3], f64, usize)>>;
+/// One instrumented ICP iteration with its contributing correspondences.
+pub(crate) struct TraceEvent {
+    pub iteration: usize,
+    pub pose: [f64; 3],
+    pub error: f64,
+    pub nvalid: usize,
+    pub restart: bool,
+    pub correspondences: Vec<TraceCorrespondence>,
+}
+
+/// A single correspondence in an instrumented iteration.
+pub(crate) struct TraceCorrespondence {
+    pub sensor: usize,
+    pub reference_j1: i32,
+    pub reference_j2: i32,
+    pub distance: f64,
+    /// Sensor point in the reference frame at correspondence time.
+    pub sensor_point: [f64; 2],
+    /// Matching reference point in the reference frame.
+    pub reference_point: [f64; 2],
+}
 
 impl IcpScratch {
     pub(crate) fn new(
@@ -192,7 +211,6 @@ impl IcpScratch {
             cov_dx_dy2: Matrix::zeros(3, sensor_rays),
             covariance: None,
             fisher: None,
-            observer: None,
             trace_events: Vec::new(),
             trace_enabled: false,
         }
@@ -218,7 +236,7 @@ fn icp_loop_with_restart(
     laser_sens: &mut LaserData,
     scratch: &mut IcpScratch,
 ) -> IcpOutcome {
-    let initial = icp_loop(params, guess, laser_ref, laser_sens, scratch);
+    let initial = icp_loop(params, guess, laser_ref, laser_sens, scratch, false);
     if !initial.success {
         return initial;
     }
@@ -235,7 +253,7 @@ fn icp_loop_with_restart(
                 initial.x[1] + perturbation[1],
                 initial.x[2] + perturbation[2],
             ];
-            let candidate = icp_loop(params, start, laser_ref, laser_sens, scratch);
+            let candidate = icp_loop(params, start, laser_ref, laser_sens, scratch, true);
             if !candidate.success {
                 // C stops trying perturbations after the first failed restart,
                 // but still returns the best successful result so far.
@@ -286,6 +304,7 @@ fn icp_loop(
     laser_ref: &LaserData,
     laser_sens: &mut LaserData,
     scratch: &mut IcpScratch,
+    restart: bool,
 ) -> IcpOutcome {
     let mut x_old = initial_guess;
     let mut x_new = x_old;
@@ -381,11 +400,33 @@ fn icp_loop(
         x_new = next;
 
         let error = trimmed.total_error;
-        if let Some(observer) = scratch.observer.as_mut() {
-            observer(iteration, x_new, error, nvalid);
-        }
         if scratch.trace_enabled {
-            scratch.trace_events.push((iteration, x_new, error, nvalid));
+            let correspondences = laser_sens
+                .corr
+                .iter()
+                .enumerate()
+                .filter(|(_, corr)| corr.valid)
+                .map(|(sensor, corr)| TraceCorrespondence {
+                    sensor,
+                    reference_j1: corr.j1,
+                    reference_j2: corr.j2,
+                    distance: corr.dist2_j1.max(0.0).sqrt(),
+                    sensor_point: laser_sens.points_w[sensor].p,
+                    reference_point: usize::try_from(corr.j1)
+                        .ok()
+                        .filter(|&j1| j1 < laser_ref.nrays)
+                        .map(|j1| laser_ref.points[j1].p)
+                        .unwrap_or([f64::NAN, f64::NAN]),
+                })
+                .collect();
+            scratch.trace_events.push(TraceEvent {
+                iteration,
+                pose: x_new,
+                error,
+                nvalid,
+                restart,
+                correspondences,
+            });
         }
         last_error = error;
         last_nvalid = nvalid as i32;

@@ -169,3 +169,42 @@ async fn advanced_configuration_changes_the_result() {
     assert!(!strict.accepted);
     assert_eq!(strict.termination, "NoCorrespondences");
 }
+
+#[tokio::test]
+async fn iteration_tracing_is_opt_in_and_agrees_with_plain_matching() {
+    let plain = post_frame(base(4)).await;
+    assert!(plain.trace.is_none(), "tracing must be opt-in");
+    assert_eq!(plain.normal_ms, 0.0);
+    assert_eq!(plain.instrumented_ms, 0.0);
+
+    let mut traced_config = base(4);
+    traced_config["trace"] = json!(true);
+    let traced = post_frame(traced_config).await;
+
+    let trace = traced.trace.as_ref().expect("trace requested");
+    assert!(!trace.is_empty(), "trace should contain real iterations");
+    assert!(traced.normal_ms.is_finite() && traced.instrumented_ms.is_finite());
+    assert!(
+        traced.normal_ms > 0.0 && traced.instrumented_ms > 0.0,
+        "both timings must be reported separately"
+    );
+    assert!(
+        trace
+            .iter()
+            .any(|iteration| !iteration.correspondences.is_empty()),
+        "traced iterations should include correspondences"
+    );
+    for iteration in trace {
+        assert!(iteration.pose.iter().all(|value| value.is_finite()));
+        assert!(iteration.error.is_finite());
+        assert_eq!(
+            iteration.valid_correspondences,
+            iteration.correspondences.len()
+        );
+    }
+    // Instrumentation must not change the match result.
+    for (a, b) in traced.estimated_pose.iter().zip(plain.estimated_pose) {
+        assert!((a - b).abs() < 1e-9, "traced pose diverged: {a} != {b}");
+    }
+    assert_eq!(traced.termination, plain.termination);
+}

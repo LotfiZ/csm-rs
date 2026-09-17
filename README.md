@@ -169,7 +169,10 @@ are preserved after unsuccessful termination.
 
 A well-formed scan pair with insufficient usable geometry is an outcome, not a
 malformed-input error. `PreparedMatcher::match_once_traced` reports real ICP
-iteration snapshots (pose, error, and valid correspondences) for inspection.
+iteration snapshots (pose, error, valid correspondences, restart context, and
+the contributing correspondences in reference-frame coordinates) for
+inspection; instrumented timing is separate from ordinary matching and tracing
+does not change the result.
 
 ### Examples
 

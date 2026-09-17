@@ -89,8 +89,8 @@ pub use config::{
     Params, ParamsError, ReadingBounds, RestartParams, StoppingCriteria, WeightParams,
 };
 pub use matching::{
-    CovarianceStatus, IterationSnapshot, MatchOutcome, MatchStatus, Matcher, PreparedMatcher,
-    PreparedPolarScan, TerminationReason,
+    CorrespondenceSnapshot, CovarianceStatus, IterationSnapshot, MatchOutcome, MatchStatus, Matcher,
+    PreparedMatcher, PreparedPolarScan, TerminationReason,
 };
 pub use pose::Pose;
 pub use scan::{CartesianScan, PolarScan, ScanError};

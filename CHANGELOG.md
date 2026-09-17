@@ -42,6 +42,10 @@
   progressive advanced configuration, and candidate-versus-accepted result
   display, verified through the browser workflow
   ([#45](https://github.com/LotfiZ/csm-rs/issues/45)).
+- Expose opt-in iteration instrumentation with pose updates, correspondences,
+  residuals, and restart context; let the browser inspect iterations, and show
+  instrumented timing separately from ordinary matching
+  ([#46](https://github.com/LotfiZ/csm-rs/issues/46)).
 - Documented the coordinate contract: metres, radians, scan ordering, sensor
   origin, and the sensor-to-reference transform composition.
 - Retained `PreparedPolarScan`/`PreparedMatcher` reusable storage and optional

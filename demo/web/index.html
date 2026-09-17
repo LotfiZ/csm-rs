@@ -63,6 +63,7 @@
       <div class="stat"><span>relative estimate</span><span id="s-relest">-</span></div>
       <div class="stat"><span>accumulated drift</span><span id="s-drift">-</span></div>
       <div class="stat"><span>uncertainty</span><span id="s-cov">-</span></div>
+      <div class="stat"><span>normal / instrumented</span><span id="s-time">-</span></div>
       <p id="drift-note" class="muted"></p>
 
       <label>scenario</label>
@@ -84,6 +85,8 @@
       <input id="dropout" type="range" min="0" max="0.8" step="0.01" value="0">
       <label>initial guess error (m/rad) <output id="o-error"></output></label>
       <input id="initial_error" type="range" min="0" max="1.5" step="0.01" value="0.05">
+      <label>iteration <output id="o-iter"></output></label>
+      <input id="iteration" type="range" min="0" max="0" step="1" value="0" disabled>
       <label>seed</label>
       <input id="seed" type="number" value="7">
 
@@ -110,6 +113,7 @@
         <label><input id="do_alpha_test" type="checkbox"> alpha orientation filter</label>
         <label><input id="do_visibility_test" type="checkbox"> visibility filter</label>
         <label><input id="do_compute_covariance" type="checkbox"> covariance / Fisher information</label>
+        <label><input id="trace" type="checkbox"> iteration inspection (instrumented timing)</label>
       </details>
     </div>
   </div>
@@ -143,6 +147,7 @@ function config(requestId) {
     do_alpha_test: checked('do_alpha_test'),
     do_visibility_test: checked('do_visibility_test'),
     do_compute_covariance: checked('do_compute_covariance'),
+    trace: checked('trace'),
     step: step,
   };
 }
@@ -177,10 +182,23 @@ function drawPoints(points, color, radius) {
 
 function projectX(x) { return canvas.width / 2 + x * (canvas.width / 2 - 20) / extent; }
 function projectY(y) { return canvas.height / 2 - y * (canvas.height / 2 - 20) / extent; }
+function drawIteration(iteration) {
+  if (!iteration) return;
+  ctx.lineWidth = 1;
+  for (const c of iteration.correspondences) {
+    const heat = Math.min(1, c.distance / 0.5);
+    ctx.strokeStyle = `rgba(${Math.round(80 + 175 * heat)}, ${Math.round(200 - 160 * heat)}, 120, 0.85)`;
+    ctx.beginPath();
+    ctx.moveTo(projectX(c.sensor_point[0]), projectY(c.sensor_point[1]));
+    ctx.lineTo(projectX(c.reference_point[0]), projectY(c.reference_point[1]));
+    ctx.stroke();
+  }
+  arrow(iteration.pose[0], iteration.pose[1], iteration.pose[2], '#a78bfa');
+}
+
 let extent = 8;
 
-function arrow(x, y, theta, color) {
-  const px = projectX(x), py = projectY(y);
+function arrow(x, y, theta, color) {  const px = projectX(x), py = projectY(y);
   ctx.strokeStyle = color; ctx.fillStyle = color; ctx.lineWidth = 2;
   ctx.beginPath(); ctx.moveTo(px, py);
   ctx.lineTo(px + Math.cos(-theta) * 26, py + Math.sin(-theta) * 26); ctx.stroke();
@@ -218,6 +236,16 @@ function render(d) {
   $('s-relest').textContent = fmt(d.relative_estimated_pose);
   $('s-drift').textContent = fmt(d.drift_pose);
   $('s-cov').textContent = d.covariance_status;
+  $('s-time').textContent = d.trace
+    ? `${d.normal_ms.toFixed(2)} / ${d.instrumented_ms.toFixed(2)} ms`
+    : 'not instrumented';
+  const iterations = d.trace ? d.trace.length : 0;
+  const slider = $('iteration');
+  slider.disabled = iterations === 0;
+  slider.max = String(Math.max(0, iterations - 1));
+  if (Number(slider.value) >= iterations) slider.value = String(Math.max(0, iterations - 1));
+  $('o-iter').textContent = iterations ? `${slider.value} / ${iterations - 1}` : '-';
+  if (d.trace && d.trace.length) drawIteration(d.trace[Number(slider.value)]);
   $('drift-note').textContent = d.reference_mode === 'previous_frame'
     ? 'Previous-frame mode composes each relative estimate, so per-frame errors accumulate as drift.'
     : 'Fixed-reference mode matches every frame against the initial reference, so it does not accumulate drift.';
@@ -243,9 +271,10 @@ $('pause').onclick = () => setPlaying(false);
 $('step').onclick = () => { setPlaying(false); step++; request(); };
 $('reset').onclick = () => { setPlaying(false); step = 0; request(); };
 setPlaying(false);
-for (const id of ['scenario', 'reference_mode', 'seed', 'search', 'metric', 'max_correspondence_dist', 'max_iterations', 'outliers_max_perc', 'restart', 'remove_doubles', 'do_alpha_test', 'do_visibility_test', 'do_compute_covariance']) {
+for (const id of ['scenario', 'reference_mode', 'seed', 'search', 'metric', 'max_correspondence_dist', 'max_iterations', 'outliers_max_perc', 'restart', 'remove_doubles', 'do_alpha_test', 'do_visibility_test', 'do_compute_covariance', 'trace']) {
   $(id).addEventListener('change', () => { step = 0; request(); });
 }
+$('iteration').addEventListener('input', () => { if (latest) render(latest); });
 for (const id of ['motion', 'noise', 'dropout', 'initial_error']) {
   $(id).addEventListener('input', () => { syncOutputs(); request(); });
 }

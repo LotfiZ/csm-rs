@@ -479,6 +479,11 @@ impl PreparedMatcher {
     }
 
     /// Match once and report the accepted result as a final snapshot.
+    ///
+    /// Tracing is opt-in and runs the same matching path; the observer is
+    /// called for every real iteration. Traced matches allocate per-iteration
+    /// correspondence storage, so instrumented timing must be reported
+    /// separately from ordinary matching timing.
     pub fn match_once_traced<F: FnMut(IterationSnapshot)>(
         &mut self,
         mut observe: F,
@@ -488,12 +493,25 @@ impl PreparedMatcher {
         let outcome = self.match_once();
         self.scratch.trace_enabled = false;
         let outcome = outcome?;
-        for (iteration, pose, error, nvalid) in self.scratch.trace_events.drain(..) {
+        for event in self.scratch.trace_events.drain(..) {
             observe(IterationSnapshot {
-                iteration,
-                pose,
-                error,
-                valid_correspondences: nvalid,
+                iteration: event.iteration,
+                pose: event.pose,
+                error: event.error,
+                valid_correspondences: event.nvalid,
+                restart: event.restart,
+                correspondences: event
+                    .correspondences
+                    .into_iter()
+                    .map(|corr| CorrespondenceSnapshot {
+                        sensor_ray: corr.sensor,
+                        reference_j1: corr.reference_j1,
+                        reference_j2: corr.reference_j2,
+                        distance: corr.distance,
+                        sensor_point: corr.sensor_point,
+                        reference_point: corr.reference_point,
+                    })
+                    .collect(),
             });
         }
         Ok(outcome)
@@ -603,12 +621,30 @@ impl MatchOutcome {
 }
 
 /// One instrumented ICP iteration.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct IterationSnapshot {
     pub iteration: usize,
     pub pose: [f64; 3],
     pub error: f64,
     pub valid_correspondences: usize,
+    /// Whether this iteration came from a restart perturbation.
+    pub restart: bool,
+    /// Correspondences that contributed to this iteration's solve.
+    pub correspondences: Vec<CorrespondenceSnapshot>,
+}
+
+/// A correspondence contributing to an instrumented iteration.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct CorrespondenceSnapshot {
+    pub sensor_ray: usize,
+    pub reference_j1: i32,
+    pub reference_j2: i32,
+    /// Point-to-line distance for this correspondence, in metres.
+    pub distance: f64,
+    /// Sensor point in the reference frame when the correspondence was found.
+    pub sensor_point: [f64; 2],
+    /// Matching reference point in the reference frame.
+    pub reference_point: [f64; 2],
 }
 
 /// Coarse match status.
