@@ -1,4 +1,4 @@
-//! Small-matrix and 2D-pose algebra, hand-rolled (grilling Q3).
+//! Small-matrix and 2D-pose algebra, hand-rolled.
 //!
 //! C: `sm/csm/math_utils.c`, `sm/csm/math_utils_gsl.c`,
 //!     `sm/csm/icp/fast_math.h`
@@ -412,7 +412,7 @@ pub(crate) fn distance_to_segment(a: [f64; 2], b: [f64; 2], point: [f64; 2]) -> 
 /// Each entry is `Some((j1, j2))` for a valid correspondence, `None` otherwise.
 ///
 /// C: `ld_corr_hash()` in `sm/csm/laser_data.c` — reproduces C's unsigned
-/// wraparound arithmetic exactly (golden-master fidelity, grilling Q2).
+/// wraparound arithmetic exactly for golden-master fidelity.
 pub fn corr_hash(entries: &[Option<(i32, i32)>]) -> u32 {
     corr_hash_iter(entries.iter().copied())
 }

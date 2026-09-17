@@ -8,7 +8,7 @@
 //! Ports: polar→cartesian conversion, world-coordinate transform, jump tables
 //! for the smart correspondence search, simple clustering, orientation
 //! estimation, and the per-ray validity model (`valid` flags + NaN readings,
-//! kept C-faithful per grilling Q9).
+//! kept C-faithful).
 
 /// A single 2D point with its polar representation.
 ///
@@ -641,8 +641,7 @@ impl LaserData {
 }
 
 /// Input validation failures, mirroring the `sm_error` checks in
-/// `ld_valid_fields()`. Malformed input is an error; a failed *match* is not
-/// (grilling Q9).
+/// `ld_valid_fields()`. Malformed input is an error; a failed *match* is not.
 ///
 /// C: `ld_valid_fields()` in `laser_data.c`
 #[derive(Clone, Debug, PartialEq, Eq)]

@@ -5,7 +5,7 @@
 //!     `sm/csm/icp/icp_outliers.c` (trim + doubles rejection),
 //!     `sm/csm/laser_data.c` (`possible_interval`, visibility test)
 //!
-//! Property-test invariant (grilling Q4): `Tricks` and `Naive` strategies
+//! Property-test invariant: `Tricks` and `Naive` strategies
 //! must produce identical correspondence sets — the same invariant C checks
 //! with `debug_verify_tricks`.
 //!
