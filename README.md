@@ -237,13 +237,14 @@ Regenerate the corpus with the C reference source checked out at
 
 ## Workspace layout
 
-- `src/` — the core library (no robotics-framework dependencies)
+- `src/` — the core library (no runtime dependencies)
 - `tests/` — integration tests and C reference fixtures
 - `examples/` — runnable examples and measurement programs
+- `demo/` — local browser demonstration (axum + Tokio, dependencies isolated)
 - `fixture-generator/` — C tool producing the reference fixtures
 - `docs/contributing.md` — contributor commands and numerical baseline
 
-The separate local demo package will be introduced as part of the remaster.
+Launch the demo with `cargo run -p csm-rs-demo --release`; see `demo/README.md`.
 
 ## License
 

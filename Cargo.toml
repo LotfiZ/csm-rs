@@ -23,7 +23,7 @@ serde = { version = "1", features = ["derive"] }
 
 [workspace]
 resolver = "2"
-members = ["."]
+members = [".", "demo"]
 
 [profile.release]
 lto = true
