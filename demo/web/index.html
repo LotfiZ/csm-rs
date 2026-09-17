@@ -1,0 +1,364 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>csm-rs demo</title>
+<style>
+  :root { color-scheme: dark; }
+  body { margin: 0; font: 15px/1.45 system-ui, sans-serif; background: #0b1220; color: #e5e7eb; }
+  main { max-width: 1080px; margin: 0 auto; padding: 1.2rem; }
+  h1 { font-size: 1.3rem; margin: 0 0 .6rem; }
+  .layout { display: grid; grid-template-columns: 1fr 320px; gap: 1rem; }
+  @media (max-width: 860px) { .layout { grid-template-columns: 1fr; } }
+  canvas { width: 100%; background: #111827; border-radius: 10px; display: block; }
+  .panel { background: #111827; border: 1px solid #1f2937; border-radius: 10px; padding: .8rem; }
+  .row { display: flex; flex-wrap: wrap; gap: .4rem; align-items: center; margin-bottom: .5rem; }
+  button { background: #1f2937; color: #e5e7eb; border: 1px solid #374151; border-radius: 8px; padding: .4rem .7rem; cursor: pointer; }
+  button:hover { background: #374151; }
+  label { display: block; margin: .45rem 0 .15rem; font-size: .85rem; color: #9ca3af; }
+  input[type=range] { width: 100%; }
+  select, input[type=number] { width: 100%; background: #0b1220; color: #e5e7eb; border: 1px solid #374151; border-radius: 6px; padding: .3rem; }
+  .legend { display: flex; gap: .8rem; flex-wrap: wrap; font-size: .82rem; margin: .4rem 0; }
+  .swatch { display: inline-block; width: .7rem; height: .7rem; border-radius: 50%; margin-right: .25rem; }
+  .stat { display: flex; justify-content: space-between; font-size: .84rem; border-bottom: 1px dashed #1f2937; padding: .15rem 0; }
+  .stat span:last-child { font-variant-numeric: tabular-nums; color: #d1d5db; }
+  details { margin-top: .6rem; }
+  summary { cursor: pointer; color: #9ca3af; }
+  .muted { color: #6b7280; font-size: .8rem; }
+  .ok { color: #4ade80; } .warn { color: #fbbf24; } .bad { color: #f87171; }
+</style>
+</head>
+<body>
+<main>
+  <h1>csm-rs local demo</h1>
+  <p class="muted">Every request runs the real Rust matcher. The server is stateless; playback is client-side.</p>
+  <div class="layout">
+    <div>
+      <canvas id="view" width="760" height="620"></canvas>
+      <div class="legend">
+        <span><i class="swatch" style="background:#60a5fa"></i>reference</span>
+        <span><i class="swatch" style="background:#f472b6"></i>unaligned sensor</span>
+        <span><i class="swatch" style="background:#34d399"></i>aligned sensor</span>
+        <span><i class="swatch" style="background:#facc15"></i>true placement</span>
+        <span><i class="swatch" style="background:#9ca3af"></i>walls</span>
+      </div>
+    </div>
+    <div class="panel">
+      <div class="row">
+        <button id="play">play</button>
+        <button id="pause">pause</button>
+        <button id="step">step</button>
+        <button id="reset">reset</button>
+      </div>
+      <div class="stat"><span>step</span><span id="s-step">0</span></div>
+      <div class="stat"><span>status</span><span id="s-status">-</span></div>
+      <div class="stat"><span>termination</span><span id="s-term">-</span></div>
+      <div class="stat"><span>iterations</span><span id="s-iter">-</span></div>
+      <div class="stat"><span>correspondences</span><span id="s-nvalid">-</span></div>
+      <div class="stat"><span>error</span><span id="s-error">-</span></div>
+      <div class="stat"><span>true total pose</span><span id="s-truth">-</span></div>
+      <div class="stat"><span>estimated total pose</span><span id="s-est">-</span></div>
+      <div class="stat"><span>relative true</span><span id="s-reltruth">-</span></div>
+      <div class="stat"><span>relative estimate</span><span id="s-relest">-</span></div>
+      <div class="stat"><span>accumulated drift</span><span id="s-drift">-</span></div>
+      <div class="stat"><span>uncertainty</span><span id="s-cov">-</span></div>
+      <div class="stat"><span>normal / instrumented</span><span id="s-time">-</span></div>
+      <p id="drift-note" class="muted"></p>
+
+      <label>scenario</label>
+      <select id="scenario">
+        <option value="asymmetric_room">asymmetric room</option>
+        <option value="ambiguous_corridor">ambiguous corridor</option>
+        <option value="partial_overlap">partial overlap</option>
+      </select>
+      <label>reference policy</label>
+      <select id="reference_mode">
+        <option value="fixed">fixed reference</option>
+        <option value="previous_frame">previous frame</option>
+      </select>
+      <label>motion <output id="o-motion"></output></label>
+      <input id="motion" type="range" min="0" max="3" step="0.05" value="1">
+      <label>noise (m) <output id="o-noise"></output></label>
+      <input id="noise" type="range" min="0" max="0.2" step="0.002" value="0.01">
+      <label>dropout <output id="o-dropout"></output></label>
+      <input id="dropout" type="range" min="0" max="0.8" step="0.01" value="0">
+      <label>initial guess error (m/rad) <output id="o-error"></output></label>
+      <input id="initial_error" type="range" min="0" max="1.5" step="0.01" value="0.05">
+      <label>iteration <output id="o-iter"></output></label>
+      <input id="iteration" type="range" min="0" max="0" step="1" value="0" disabled>
+      <label>seed</label>
+      <input id="seed" type="number" value="7">
+
+      <details>
+        <summary>import / export / replay sessions</summary>
+        <div class="row">
+          <button id="export">export</button>
+          <button id="doimport">import</button>
+          <button id="replay">replay</button>
+          <button id="sample">sample</button>
+        </div>
+        <textarea id="session" rows="8" spellcheck="false" style="width:100%;background:#0b1220;color:#e5e7eb;border:1px solid #374151;border-radius:6px;font-family:ui-monospace,monospace;font-size:.78rem"></textarea>
+        <p id="io-status" class="muted"></p>
+      </details>
+
+      <details>
+        <summary>advanced matching configuration</summary>
+        <label>search</label>
+        <select id="search">
+          <option value="tricks">tricks</option>
+          <option value="naive">naive</option>
+        </select>
+        <label>metric</label>
+        <select id="metric">
+          <option value="point_to_line">point to line</option>
+          <option value="point_to_point">point to point</option>
+        </select>
+        <label>max correspondence distance</label>
+        <input id="max_correspondence_dist" type="number" step="0.1" value="2.0">
+        <label>max iterations</label>
+        <input id="max_iterations" type="number" step="1" value="1000">
+        <label>outlier max percent</label>
+        <input id="outliers_max_perc" type="number" step="0.01" value="0.95">
+        <label><input id="restart" type="checkbox" checked> restart shell</label>
+        <label><input id="remove_doubles" type="checkbox" checked> remove duplicate correspondences</label>
+        <label><input id="do_alpha_test" type="checkbox"> alpha orientation filter</label>
+        <label><input id="do_visibility_test" type="checkbox"> visibility filter</label>
+        <label><input id="do_compute_covariance" type="checkbox"> covariance / Fisher information</label>
+        <label><input id="trace" type="checkbox"> iteration inspection (instrumented timing)</label>
+      </details>
+    </div>
+  </div>
+</main>
+<script>
+const $ = (id) => document.getElementById(id);
+const canvas = $('view');
+const ctx = canvas.getContext('2d');
+let step = 0, playing = false, timer = null, lastRequest = 0, latest = null;
+
+function num(id) { return parseFloat($(id).value); }
+function checked(id) { return $(id).checked; }
+
+function config(requestId) {
+  return {
+    request_id: requestId,
+    scenario: $('scenario').value,
+    reference_mode: $('reference_mode').value,
+    seed: parseInt($('seed').value || '7', 10),
+    motion: num('motion'),
+    noise: num('noise'),
+    dropout: num('dropout'),
+    initial_error: num('initial_error'),
+    restart: checked('restart'),
+    search: $('search').value,
+    metric: $('metric').value,
+    max_correspondence_dist: num('max_correspondence_dist'),
+    max_iterations: parseInt($('max_iterations').value || '1000', 10),
+    outliers_max_perc: num('outliers_max_perc'),
+    remove_doubles: checked('remove_doubles'),
+    do_alpha_test: checked('do_alpha_test'),
+    do_visibility_test: checked('do_visibility_test'),
+    do_compute_covariance: checked('do_compute_covariance'),
+    trace: checked('trace'),
+    step: step,
+  };
+}
+
+function syncOutputs() {
+  $('o-motion').textContent = num('motion').toFixed(2);
+  $('o-noise').textContent = num('noise').toFixed(3);
+  $('o-dropout').textContent = num('dropout').toFixed(2);
+  $('o-error').textContent = num('initial_error').toFixed(2);
+}
+
+function request() {
+  const id = ++lastRequest;
+  fetch('/api/frame', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(config(id)) })
+    .then((r) => r.json())
+    .then((data) => {
+      // Drop stale responses so older frames cannot overwrite newer state.
+      if (data.request_id < lastRequest) return;
+      latest = data;
+      render(data);
+    })
+    .catch(() => {});
+}
+
+function drawPoints(points, color, radius) {
+  ctx.fillStyle = color;
+  for (const p of points) {
+    const x = projectX(p[0]), y = projectY(p[1]);
+    ctx.beginPath(); ctx.arc(x, y, radius, 0, Math.PI * 2); ctx.fill();
+  }
+}
+
+function projectX(x) { return canvas.width / 2 + x * (canvas.width / 2 - 20) / extent; }
+function projectY(y) { return canvas.height / 2 - y * (canvas.height / 2 - 20) / extent; }
+function drawIteration(iteration) {
+  if (!iteration) return;
+  ctx.lineWidth = 1;
+  for (const c of iteration.correspondences) {
+    const heat = Math.min(1, c.distance / 0.5);
+    ctx.strokeStyle = `rgba(${Math.round(80 + 175 * heat)}, ${Math.round(200 - 160 * heat)}, 120, 0.85)`;
+    ctx.beginPath();
+    ctx.moveTo(projectX(c.sensor_point[0]), projectY(c.sensor_point[1]));
+    ctx.lineTo(projectX(c.reference_point[0]), projectY(c.reference_point[1]));
+    ctx.stroke();
+  }
+  arrow(iteration.pose[0], iteration.pose[1], iteration.pose[2], '#a78bfa');
+}
+
+let extent = 8;
+
+function arrow(x, y, theta, color) {  const px = projectX(x), py = projectY(y);
+  ctx.strokeStyle = color; ctx.fillStyle = color; ctx.lineWidth = 2;
+  ctx.beginPath(); ctx.moveTo(px, py);
+  ctx.lineTo(px + Math.cos(-theta) * 26, py + Math.sin(-theta) * 26); ctx.stroke();
+  ctx.beginPath(); ctx.arc(px, py, 4, 0, Math.PI * 2); ctx.fill();
+}
+
+function render(d) {
+  extent = d.extent * 1.15;
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  ctx.strokeStyle = '#9ca3af'; ctx.lineWidth = 2;
+  for (const s of d.segments) {
+    ctx.beginPath();
+    ctx.moveTo(projectX(s[0][0]), projectY(s[0][1]));
+    ctx.lineTo(projectX(s[1][0]), projectY(s[1][1]));
+    ctx.stroke();
+  }
+  drawPoints(d.reference, '#60a5fa', 2.4);
+  drawPoints(d.sensor_true, '#facc15', 1.8);
+  drawPoints(d.sensor_unaligned, '#f472b6', 2.0);
+  drawPoints(d.sensor_aligned, '#34d399', 2.4);
+  arrow(d.truth_pose[0], d.truth_pose[1], d.truth_pose[2], '#facc15');
+  arrow(d.estimated_pose[0], d.estimated_pose[1], d.estimated_pose[2], '#34d399');
+
+  $('s-step').textContent = d.step;
+  const label = d.accepted ? 'accepted convergence' : (d.valid ? 'candidate (not accepted)' : 'unsuccessful');
+  $('s-status').textContent = label;
+  $('s-status').className = d.accepted ? 'ok' : (d.valid ? 'warn' : 'bad');
+  $('s-term').textContent = d.termination;
+  $('s-iter').textContent = d.iterations;
+  $('s-nvalid').textContent = d.nvalid;
+  $('s-error').textContent = d.error.toFixed(5);
+  $('s-truth').textContent = fmt(d.truth_pose);
+  $('s-est').textContent = fmt(d.estimated_pose);
+  $('s-reltruth').textContent = fmt(d.relative_truth_pose);
+  $('s-relest').textContent = fmt(d.relative_estimated_pose);
+  $('s-drift').textContent = fmt(d.drift_pose);
+  $('s-cov').textContent = d.covariance_status;
+  $('s-time').textContent = d.trace
+    ? `${d.normal_ms.toFixed(2)} / ${d.instrumented_ms.toFixed(2)} ms`
+    : 'not instrumented';
+  const iterations = d.trace ? d.trace.length : 0;
+  const slider = $('iteration');
+  slider.disabled = iterations === 0;
+  slider.max = String(Math.max(0, iterations - 1));
+  if (Number(slider.value) >= iterations) slider.value = String(Math.max(0, iterations - 1));
+  $('o-iter').textContent = iterations ? `${slider.value} / ${iterations - 1}` : '-';
+  if (d.trace && d.trace.length) drawIteration(d.trace[Number(slider.value)]);
+  $('drift-note').textContent = d.reference_mode === 'previous_frame'
+    ? 'Previous-frame mode composes each relative estimate, so per-frame errors accumulate as drift.'
+    : 'Fixed-reference mode matches every frame against the initial reference, so it does not accumulate drift.';
+}
+
+function renderImport(d) {
+  extent = d.extent;
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  drawPoints(d.reference, '#60a5fa', 2.4);
+  drawPoints(d.sensor_unaligned, '#f472b6', 2.0);
+  drawPoints(d.sensor_aligned, '#34d399', 2.4);
+  arrow(d.estimated_pose[0], d.estimated_pose[1], d.estimated_pose[2], '#34d399');
+  $('s-truth').textContent = '-';
+  $('s-reltruth').textContent = '-';
+  $('s-relest').textContent = '-';
+  $('s-drift').textContent = '-';
+  $('s-est').textContent = fmt(d.estimated_pose);
+  $('s-term').textContent = d.termination;
+  $('s-iter').textContent = d.iterations;
+  $('s-nvalid').textContent = d.nvalid;
+  $('s-error').textContent = d.error.toFixed(5);
+  $('s-cov').textContent = d.covariance_status;
+  const label = d.accepted ? 'accepted convergence' : (d.valid ? 'candidate (not accepted)' : 'unsuccessful');
+  $('s-status').textContent = label;
+  $('s-status').className = d.accepted ? 'ok' : (d.valid ? 'warn' : 'bad');
+  $('s-time').textContent = 'imported pair';
+  $('drift-note').textContent = 'Imported data has no ground truth; the matcher result is shown without one.';
+}
+
+function fmt(p) { return `(${p[0].toFixed(3)}, ${p[1].toFixed(3)}, ${p[2].toFixed(3)})`; }
+
+function setPlaying(value) {
+  playing = value;
+  if (playing && !timer) {
+    timer = setInterval(() => { step++; request(); }, 250);
+  }
+  if (!playing && timer) {
+    clearInterval(timer);
+    timer = null;
+  }
+  $('play').disabled = playing;
+  $('pause').disabled = !playing;
+}
+
+$('play').onclick = () => setPlaying(true);
+$('pause').onclick = () => setPlaying(false);
+$('step').onclick = () => { setPlaying(false); step++; request(); };
+$('reset').onclick = () => { setPlaying(false); step = 0; request(); };
+setPlaying(false);
+for (const id of ['scenario', 'reference_mode', 'seed', 'search', 'metric', 'max_correspondence_dist', 'max_iterations', 'outliers_max_perc', 'restart', 'remove_doubles', 'do_alpha_test', 'do_visibility_test', 'do_compute_covariance', 'trace']) {
+  $(id).addEventListener('change', () => { step = 0; request(); });
+}
+$('iteration').addEventListener('input', () => { if (latest) render(latest); });
+
+async function postJson(path, body) {
+  const response = await fetch(path, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
+  const text = await response.text();
+  if (!response.ok) throw new Error(text || `HTTP ${response.status}`);
+  return JSON.parse(text);
+}
+
+$('export').onclick = () => {
+  postJson('/api/export', config(0))
+    .then((data) => { $('session').value = JSON.stringify(data, null, 2); $('io-status').textContent = 'session exported'; })
+    .catch((error) => { $('io-status').textContent = `export failed: ${error.message}`; });
+};
+$('doimport').onclick = () => {
+  try {
+    postJson('/api/import', JSON.parse($('session').value))
+      .then((data) => { renderImport(data); $('io-status').textContent = 'import matched'; })
+      .catch((error) => { $('io-status').textContent = `import rejected: ${error.message}`; });
+  } catch (error) {
+    $('io-status').textContent = `import rejected: ${error.message}`;
+  }
+};
+$('replay').onclick = () => {
+  try {
+    postJson('/api/replay', JSON.parse($('session').value))
+      .then((data) => { renderImport(data); $('io-status').textContent = 'replay matched and agreed'; })
+      .catch((error) => { $('io-status').textContent = `replay failed: ${error.message}`; });
+  } catch (error) {
+    $('io-status').textContent = `replay failed: ${error.message}`;
+  }
+};
+$('sample').onclick = () => {
+  const angles = Array.from({ length: 61 }, (_, i) => -1.5 + i * 0.05);
+  const readings = angles.map((a) => 6 + 0.5 * Math.sin(3 * a));
+  $('session').value = JSON.stringify({
+    format: 'csm-rs-scan-pair',
+    version: 1,
+    initial_guess: [0, 0, 0],
+    reference: { kind: 'polar', angles, readings, valid: readings.map(() => true) },
+    sensor: { kind: 'polar', angles, readings, valid: readings.map(() => true) },
+  }, null, 2);
+  $('io-status').textContent = 'sample format loaded';
+};
+for (const id of ['motion', 'noise', 'dropout', 'initial_error']) {
+  $(id).addEventListener('input', () => { syncOutputs(); request(); });
+}
+syncOutputs();
+request();
+</script>
+</body>
+</html>

@@ -1,210 +1,147 @@
 # csm-rs
 
-Rust port of the **Canonical Scan Matcher** ([Andrea Censi's CSM](https://github.com/AndreaCensi/csm)):
-point-to-line ICP with smart correspondence search, outlier rejection, and a
-closed-form estimate of the matching covariance
-([Censi, ICRA 2007](https://purl.org/censi/2007/icpcov)).
+[![LGPL-3.0-only Licensed](https://img.shields.io/badge/license-LGPL--3.0--only-brightgreen.svg?style=flat-square)](LICENSE)
+![CI](https://github.com/LotfiZ/csm-rs/workflows/CI/badge.svg)
 
-## Status
+Point-to-line ICP scan matching (Censi, 2007) with smart correspondence search,
+outlier rejection, restart handling, and an optional closed-form estimate of the
+matching covariance. The library has no runtime dependencies and is built around
+ordered scans, validated configuration, matching, and results.
 
-Port scope is the `sm_icp` path only (ICP/PlICP + covariance); GPM/HSM/MbICP,
-Cairo drawing, and the CLI apps are intentionally excluded.
+## Requirements
 
-Design decisions were captured in a structured grilling session — see module
-docs for the C cross-references and per-decision rationale.
+Rust 1.70 or newer. The library itself has no dependencies.
 
-## Validation strategy
+## Installation
 
-The port is validated *golden-master* against the original C library:
-a throwaway C generator (in `fixture-generator/`, never built by cargo) links
-the reference implementation and emits JSON fixtures (scan pairs + params +
-expected results) checked into `crates/csm-rs/tests/fixtures/`. The 16-case
-corpus covers the synthetic baseline, covariance, trimming, duplicate,
-restart, oscillation, feature, and weighting paths, plus the upstream
-`misc/tests` logs, a three-point collinear degenerate geometry case, and an
-explicit max-iteration exhaustion case. The public tracer path checks pose to
-1e-9, `iterations`/`nvalid` exactly, and the configured first-iteration
-correspondence hash exactly. The crate-internal seam checks that tricks and
-naive correspondence search produce the same keys and hash on the synthetic
-common path. Alpha-enabled fixtures validate the configured C path; CSM's
-smart routine intentionally omits the optional alpha filter. The imported
-`stallo2` log records another known C behavior: CSM's smart and naive searches
-diverge on that scan's invalid sectors, so the Rust port keeps and tests each
-C path instead of hiding the divergence. The covariance fixture checks the
-closed-form result and its derivative matrices to 1e-6 relative error. Match
-errors use 1e-9 for synthetic cases and 2e-9 for imported logs to account for
-their different native math paths.
+The crate is not published on crates.io. Add it as a git dependency:
+
+```toml
+[dependencies]
+csm-rs = { git = "https://github.com/LotfiZ/csm-rs" }
+```
 
 ## Quick start
 
-Install Rust, then run the complete fixture suite from the repository root:
-
-```sh
-cargo test --all-targets --all-features
-```
-
-For an application, construct each scan from angles, readings, and validity
-flags. The matcher returns an error for malformed scan storage and puts a
-normal convergence failure in `result.valid`:
-
 ```rust
-use csm_rs::{sm_icp, LaserData, Params, SmResult};
+use csm_rs::{Matcher, Params, PolarScan};
 
-fn match_scans(
-    angles: Vec<f64>,
-    reference_readings: Vec<f64>,
-    sensor_readings: Vec<f64>,
-    valid: Vec<bool>,
-) -> Result<SmResult, Box<dyn std::error::Error>> {
-    let mut reference = LaserData::from_polar(
-        angles.clone(),
-        reference_readings,
-        valid.clone(),
-    )?;
-    let mut sensor = LaserData::from_polar(angles, sensor_readings, valid)?;
-    let mut result = SmResult::default();
-    sm_icp(&Params::default(), &mut reference, &mut sensor, &mut result)?;
-    Ok(result)
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    // Ordered polar scan: 21 rays from -1 rad to 1 rad.
+    let angles: Vec<f64> = (0..21).map(|i| -1.0 + i as f64 * 0.1).collect();
+    let readings: Vec<f64> = angles.iter().map(|a| 8.0 + 0.2 * a.cos()).collect();
+    let valid = vec![true; angles.len()];
+
+    let reference = PolarScan::new(&angles, &readings, &valid)?;
+    let sensor = PolarScan::new(&angles, &readings, &valid)?;
+
+    let matcher = Matcher::new(Params::default())?;
+    let outcome = matcher.match_polar(reference, sensor)?;
+    if outcome.valid {
+        println!("sensor-to-reference pose = {:?}", outcome.pose);
+    }
+    Ok(())
 }
 ```
 
-`result.valid == true` means the scans matched. `false` means the inputs were
-well-formed but ICP did not produce a usable match. A `?` error means the
-input arrays or scan values violate CSM's input contract. Invalid lidar rays
-should have `valid[i] == false`; their reading can be `NaN`.
-
-For a beginner-friendly example that creates laser data, prints every beam in
-a readable table, and displays the estimated movement, run:
+A self-contained example that simulates a robot in a square room is included:
 
 ```sh
 cargo run -p csm-rs --example scan_matching
 ```
 
-The example simulates a robot scanning a square room. It needs no input files,
-extra dependencies, or C installation. Change `FIRST_SENSOR_POSE` in
-`crates/csm-rs/examples/scan_matching.rs` to try another small movement.
+## Coordinates and inputs
 
-Performance baselines are dependency-free and reproducible in release mode:
+Inputs use **metres and radians**. Each scan is centered on its own sensor
+origin, and rays are **ordered by bearing**: a polar ray at `theta` with reading
+`r` is the sensor-frame point `[r cos(theta), r sin(theta)]`. Cartesian scans are
+supported as well; their bearings are derived as `atan2(y, x)` unless supplied
+with `CartesianScan::with_angles`. The matcher relies on that ordering and never
+sorts or drops points, so unordered point-cloud registration is out of scope.
 
-```sh
-cargo run --release -p csm-rs --example benchmark_baseline
-cargo run --release -p csm-rs --example benchmark_prepared
-```
+The result maps sensor-scan coordinates into reference-scan coordinates:
+`R(theta) * p + (x, y)`, with `theta` counter-clockwise.
 
-For a repeatable release resource report (optimized example sizes plus the
-prepared latency benchmark), run `scripts/measure-release.sh`.
+A missing lidar return is marked with `valid[i] == false` and keeps its position
+in the scan order. Malformed input returns a `ScanError`. A well-formed pair that
+cannot be matched is a normal outcome with `valid == false`; inspect
+`MatchOutcome::termination` for the reason.
 
-The prepared benchmark reports both full covariance mode and the pose-only
-mode, allowing deployments to measure the cost of uncertainty outputs on their
-own hardware.
+## Initial pose and reference
 
-The idiomatic API borrows application buffers and returns a typed outcome:
+`match_polar`/`match_cartesian` start from the identity pose. Pass an explicit
+guess, for example from odometry, with `match_polar_from`/`match_cartesian_from`:
 
 ```rust
-use csm_rs::{Matcher, Params, PolarScan};
+use csm_rs::{Matcher, Params, Pose};
 
-let reference = PolarScan::new(&angles, &reference_readings, &valid)?;
-let sensor = PolarScan::new(&angles, &sensor_readings, &valid)?;
-let outcome = Matcher::new(Params::default()).match_polar(reference, sensor)?;
-if outcome.converged() {
-    println!("pose = {:?}", outcome.pose);
-}
+let matcher = Matcher::new(Params::default())?;
+let guess = Pose::new(0.10, -0.05, 0.02);
+let outcome = matcher.match_polar_from(reference, sensor, guess)?;
 ```
 
-The legacy `sm_icp` function remains available for conformance tooling and
-existing callers. It is frozen and receives no new capabilities; new
-integrations should use `Matcher::prepare_polar`,
-`Matcher::prepare_cartesian`, or `Matcher::prepare` so scan ownership and
-workspace reuse are explicit.
+The reference scan is always chosen by the caller.
 
-For fixed-rate applications, create `PreparedPolarScan` values once and reuse
-them with `match_prepared` or `match_prepared_into`. Ordered Cartesian points
-are also accepted through `CartesianScan`; the idiomatic validator has no
-artificial upper ray-count limit. To generate a browser-viewable HTML
-demonstration, run:
+## Uncertainty and reusable storage
 
-```sh
-cargo run --release -p csm-rs --example visual_match > match.html
-```
+Matching is pose-only by default. Enable the closed-form covariance, derivative
+matrices, and Fisher information with `Params::do_compute_covariance`; the result
+reports uncertainty status independently of whether the pose is usable.
 
-To run the local browser-backed demo instead:
+For fixed-rate applications, build a `PreparedMatcher` once and update its frames
+in place:
 
-```sh
-cargo run --release -p csm-rs --example interactive_server
-```
-
-Then open `http://127.0.0.1:7878`.
-Pass an address as the first argument when another interface or port is needed,
-for example `cargo run --example interactive_server -- 0.0.0.0:8080`.
-
-To inspect imported Cartesian scans, provide one file (or a reference and
-sensor pair) containing one `x y` point per line:
-
-```sh
-cargo run --release -p csm-rs --example import_scan -- reference.txt sensor.txt > imported.html
-```
-
-Prepared scans can be refreshed in place with `update` or
-`update_cartesian`, retaining their allocation capacity. The
-`match_prepared_observed` method invokes a caller-supplied closure with each
-outcome, which is suitable for metrics, logging, or a UI adapter without a
-runtime logging dependency.
-
-`MatchOutcome::termination` identifies whether a match converged, reached the
-iteration limit, found no correspondences, or failed for another reason.
-`MatchOutcome::covariance_status` separately reports disabled, computed, and
-failed uncertainty diagnostics, so an accepted pose remains usable when its
-optional covariance cannot be produced.
-
-Embedded integrations can inspect `PreparedMatcher::workspace_bytes()` and
-`capacities()` before entering a fixed-rate loop.
-
-For a fixed-shape stream, `Matcher::prepare` retains the scan and ICP
-workspace across frames:
-
-```text
-let mut workspace = Matcher::pose_only(Params::default()).prepare(reference, sensor)?;
+```rust
+let matcher = Matcher::default_pose_only();
+let mut workspace = matcher.prepare(reference, sensor)?;
 workspace.update_sensor(&next_readings, &next_valid)?;
-let estimate = workspace.match_once()?;
-# Ok::<(), csm_rs::LaserDataError>(())
+let outcome = workspace.match_once()?;
 ```
 
-When covariance is not needed, `Matcher::pose_only(Params::default())`
-disables the optional covariance and derivative calculations for a smaller
-embedded runtime path.
+Preparation allocates all scan and scratch storage; repeated pose-only matching
+afterwards performs no heap allocation. Capacity is explicit: inputs larger than
+the reserved capacity return `ScanError::CapacityExceeded` instead of growing
+mid-match. Grow it with `PreparedMatcher::reserve`.
 
-Use `Matcher::try_new(params)` when configuration comes from a file or another
-runtime source; it validates finite values, ranges, and the iteration limit
-before the matcher is constructed.
+## Performance
 
-Regenerate the corpus with the C reference source checked out at
-`/home/agx/workspace/csm-src`:
+Measured on a Jetson AGX Xavier (8× ARMv8, `--release`), synthetic ordered polar
+scans. Latency excludes preparation; measure on your own hardware before
+relying on these figures.
+
+| scan | mode | mean | p99 |
+| ---: | --- | ---: | ---: |
+| 2,048 rays | pose only | 5.4 ms | 7.3 ms |
+| 3,000 rays | pose only | 10.2 ms | 13.6 ms |
+| 3,000 rays | with covariance | 11.7 ms | 14.4 ms |
+| 10,000 rays | pose only | 124 ms | 129 ms |
+
+Typical 2,000–3,000-point scans support 20–30 Hz cycles. Larger scans scale
+super-linearly. These are ordinary Linux figures, not a hard real-time
+guarantee.
+
+## Interactive demo
+
+A local browser demo runs the real matcher and shows the reference, unaligned,
+and aligned scans:
 
 ```sh
-./fixture-generator/build.sh /home/agx/workspace/csm-src \
-  crates/csm-rs/tests/fixtures/identity.json
+cargo run -p csm-rs-demo --release
 ```
 
-## Workspace layout
+Then open <http://127.0.0.1:7878>. See [demo/README.md](demo/README.md).
 
-- `crates/csm-rs` — the pure library (no robotics-framework dependencies)
-- `fixture-generator/` — throwaway C tool producing the JSON fixtures
-- *(parked)* `crates/csm-horus-node` — [HORUS](https://horusrobotics.dev) node
-  wrapper, to be designed once the library validates
+## Testing
+
+```sh
+cargo test
+```
+
+## Changelog
+
+See [CHANGELOG.md](CHANGELOG.md).
 
 ## License
 
-The scan, correspondence, ICP, and covariance modules are derivative work of
-Andrea Censi's Canonical Scan Matcher (CSM), released under LGPLv3. The
-closed-form solver in `solver.rs` is derivative work of Andrea Censi's
-vendored `gpc` solver, released under GPLv2-or-later. The checked-in fixture
-generator is a separate throwaway C tool and is not part of the Rust crate.
-
-The current Rust crate is distributed under **GPL-2.0-or-later** because it
-contains a direct port of the upstream gpc solver, whose source is
-GPL-2.0-or-later. The remaining CSM-derived algorithm is LGPL-3.0, and its
-license text is included for attribution. See NOTICE.md for component-level
-provenance. The crate cannot claim an LGPL-only option while the GPL-derived
-solver remains part of the combined work. A future clean-room solver may enable
-a different license declaration; that would require a separate provenance
-review.
+csm-rs is distributed under the **LGPL-3.0** license, the same as Andrea
+Censi's Canonical Scan Matcher, from which it derives. See [LICENSE](LICENSE).
