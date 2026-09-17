@@ -1,0 +1,1113 @@
+//! Laser scan data structure and derived quantities.
+//!
+//! Polar→cartesian conversion, world-coordinate transform, jump tables for
+//! the smart correspondence search, clustering, orientation estimation, and
+//! the per-ray validity model (`valid` flags plus NaN readings).
+
+/// A single 2D point with its polar representation.
+///
+#[derive(Clone, Copy, Debug, Default)]
+pub struct Point {
+    /// Cartesian coordinates `(x, y)`.
+    pub p: [f64; 2],
+    /// Range from the origin.
+    pub rho: f64,
+    /// Bearing from the origin.
+    pub phi: f64,
+}
+
+/// One correspondence between a ray of the sensor scan and the reference scan.
+///
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Correspondence {
+    /// Whether this correspondence survived the current filtering pass.
+    pub valid: bool,
+    /// Closest point in the other scan (-1 when unset).
+    pub j1: i32,
+    /// Second closest point in the other scan (-1 when unset).
+    pub j2: i32,
+    /// Point-to-point or point-to-line.
+    pub corr_type: CorrespondenceType,
+    /// Squared distance from p(i) to point j1.
+    pub dist2_j1: f64,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum CorrespondenceType {
+    #[default]
+    PointToPoint,
+    PointToLine,
+}
+
+impl Default for Correspondence {
+    fn default() -> Self {
+        Self {
+            valid: false,
+            j1: -1,
+            j2: -1,
+            corr_type: CorrespondenceType::PointToPoint,
+            dist2_j1: 0.0,
+        }
+    }
+}
+
+/// One laser scan: `nrays` rays with polar + cartesian representations.
+///
+#[derive(Clone, Debug)]
+pub struct ScanData {
+    /// Number of rays in this scan.
+    pub nrays: usize,
+    /// Angle of the first ray.
+    pub min_theta: f64,
+    /// Angle of the last ray.
+    pub max_theta: f64,
+
+    /// Ray angles in scan order.
+    pub theta: Vec<f64>,
+    /// Explicit validity flag for each ray.
+    pub valid: Vec<bool>,
+    /// Polar range reading for each ray; invalid readings are commonly NaN.
+    pub readings: Vec<f64>,
+    /// Per-ray standard deviation; NaN means no value is supplied.
+    pub readings_sigma: Vec<f64>,
+
+    /// Cluster index for each ray (-1 means no cluster).
+    pub cluster: Vec<i32>,
+    /// Estimated surface orientation (NaN if not computed).
+    pub alpha: Vec<f64>,
+    /// Orientation covariance (NaN if not computed).
+    pub cov_alpha: Vec<f64>,
+    /// Whether the corresponding `alpha` value is usable.
+    pub alpha_valid: Vec<bool>,
+    /// Ground-truth surface orientation used by ML weighting when available.
+    pub true_alpha: Vec<f64>,
+
+    /// Correspondence for each sensor ray.
+    pub corr: Vec<Correspondence>,
+
+    /// Cartesian points in the scan frame.
+    pub points: Vec<Point>,
+    /// Cartesian points in the world frame.
+    pub points_w: Vec<Point>,
+
+    /// Jump table to the next larger reading while walking upward.
+    pub up_bigger: Vec<i32>,
+    /// Jump table to the next smaller reading while walking upward.
+    pub up_smaller: Vec<i32>,
+    /// Jump table to the next larger reading while walking downward.
+    pub down_bigger: Vec<i32>,
+    /// Jump table to the next smaller reading while walking downward.
+    pub down_smaller: Vec<i32>,
+}
+
+impl ScanData {
+    /// Allocate a scan with `nrays` rays spanning `[min_theta, max_theta]`;
+    /// `theta` is linearly spaced (so `min_theta == theta[0]` and
+    /// `max_theta == theta[last]`). Rays start invalid, readings
+    /// NaN, cluster -1, correspondences unset, points NaN.
+    ///
+    pub fn new(nrays: usize, min_theta: f64, max_theta: f64) -> Self {
+        let theta: Vec<f64> = match nrays {
+            0 => Vec::new(),
+            1 => vec![min_theta],
+            _ => (0..nrays)
+                .map(|i| min_theta + (max_theta - min_theta) * i as f64 / (nrays - 1) as f64)
+                .collect(),
+        };
+        let nan_point = Point {
+            p: [f64::NAN, f64::NAN],
+            rho: f64::NAN,
+            phi: f64::NAN,
+        };
+        Self {
+            nrays,
+            min_theta,
+            max_theta,
+            theta,
+            valid: vec![false; nrays],
+            readings: vec![f64::NAN; nrays],
+            readings_sigma: vec![f64::NAN; nrays],
+            cluster: vec![-1; nrays],
+            alpha: vec![f64::NAN; nrays],
+            cov_alpha: vec![f64::NAN; nrays],
+            alpha_valid: vec![false; nrays],
+            true_alpha: vec![f64::NAN; nrays],
+            corr: vec![Correspondence::default(); nrays],
+            points: vec![nan_point; nrays],
+            points_w: vec![nan_point; nrays],
+            up_bigger: vec![0; nrays],
+            up_smaller: vec![0; nrays],
+            down_bigger: vec![0; nrays],
+            down_smaller: vec![0; nrays],
+        }
+    }
+
+    /// Build a scan from raw polar data.
+    ///
+    /// `theta`, `readings`, and `valid` must have the same length. Invalid
+    /// readings should be represented with `valid[i] == false`; keeping their
+    /// value as NaN. The first and last angles become
+    /// `min_theta` and `max_theta`, respectively, and the complete scan is
+    /// validated before it is returned.
+    pub fn from_polar(
+        theta: Vec<f64>,
+        readings: Vec<f64>,
+        valid: Vec<bool>,
+    ) -> Result<Self, ScanError> {
+        let nrays = theta.len();
+        if readings.len() != nrays {
+            return Err(ScanError::InconsistentLengths {
+                field: "readings",
+                expected: nrays,
+                actual: readings.len(),
+            });
+        }
+        if valid.len() != nrays {
+            return Err(ScanError::InconsistentLengths {
+                field: "valid",
+                expected: nrays,
+                actual: valid.len(),
+            });
+        }
+
+        let min_theta = theta.first().copied().unwrap_or(f64::NAN);
+        let max_theta = theta.last().copied().unwrap_or(f64::NAN);
+        let mut scan = Self::new(nrays, min_theta, max_theta);
+        scan.theta = theta;
+        scan.readings = readings;
+        scan.valid = valid;
+        scan.validate()?;
+        Ok(scan)
+    }
+
+    /// Allocate per-ray storage for `capacity` rays without committing to a
+    /// scan shape. Use [`Self::resize_rays`] to grow into it without further
+    /// allocation.
+    pub fn with_capacity(capacity: usize) -> Self {
+        Self {
+            nrays: 0,
+            min_theta: f64::NAN,
+            max_theta: f64::NAN,
+            theta: Vec::with_capacity(capacity),
+            valid: Vec::with_capacity(capacity),
+            readings: Vec::with_capacity(capacity),
+            readings_sigma: Vec::with_capacity(capacity),
+            cluster: Vec::with_capacity(capacity),
+            alpha: Vec::with_capacity(capacity),
+            cov_alpha: Vec::with_capacity(capacity),
+            alpha_valid: Vec::with_capacity(capacity),
+            true_alpha: Vec::with_capacity(capacity),
+            corr: Vec::with_capacity(capacity),
+            points: Vec::with_capacity(capacity),
+            points_w: Vec::with_capacity(capacity),
+            up_bigger: Vec::with_capacity(capacity),
+            up_smaller: Vec::with_capacity(capacity),
+            down_bigger: Vec::with_capacity(capacity),
+            down_smaller: Vec::with_capacity(capacity),
+        }
+    }
+
+    /// Reserved ray capacity across the per-ray arrays.
+    pub fn capacity(&self) -> usize {
+        self.theta.capacity()
+    }
+
+    /// Reserve room for at least `capacity` rays without changing the current
+    /// scan shape. This is the only operation that grows a prepared scan.
+    pub fn reserve_rays(&mut self, capacity: usize) {
+        self.theta
+            .reserve(capacity.saturating_sub(self.theta.len()));
+        self.valid
+            .reserve(capacity.saturating_sub(self.valid.len()));
+        self.readings
+            .reserve(capacity.saturating_sub(self.readings.len()));
+        self.readings_sigma
+            .reserve(capacity.saturating_sub(self.readings_sigma.len()));
+        self.cluster
+            .reserve(capacity.saturating_sub(self.cluster.len()));
+        self.alpha
+            .reserve(capacity.saturating_sub(self.alpha.len()));
+        self.cov_alpha
+            .reserve(capacity.saturating_sub(self.cov_alpha.len()));
+        self.alpha_valid
+            .reserve(capacity.saturating_sub(self.alpha_valid.len()));
+        self.true_alpha
+            .reserve(capacity.saturating_sub(self.true_alpha.len()));
+        self.corr.reserve(capacity.saturating_sub(self.corr.len()));
+        self.points
+            .reserve(capacity.saturating_sub(self.points.len()));
+        self.points_w
+            .reserve(capacity.saturating_sub(self.points_w.len()));
+        self.up_bigger
+            .reserve(capacity.saturating_sub(self.up_bigger.len()));
+        self.up_smaller
+            .reserve(capacity.saturating_sub(self.up_smaller.len()));
+        self.down_bigger
+            .reserve(capacity.saturating_sub(self.down_bigger.len()));
+        self.down_smaller
+            .reserve(capacity.saturating_sub(self.down_smaller.len()));
+    }
+
+    /// Resize the scan to exactly `nrays` rays, resetting every per-ray array.
+    /// The caller must have reserved at least `nrays` capacity and then fills
+    /// `theta`, `readings`, and `valid` before validating.
+    pub fn resize_rays(&mut self, nrays: usize) {
+        self.nrays = nrays;
+        self.theta.resize(nrays, f64::NAN);
+        self.valid.resize(nrays, false);
+        self.readings.resize(nrays, f64::NAN);
+        self.readings_sigma.resize(nrays, f64::NAN);
+        self.cluster.resize(nrays, -1);
+        self.alpha.resize(nrays, f64::NAN);
+        self.cov_alpha.resize(nrays, f64::NAN);
+        self.alpha_valid.resize(nrays, false);
+        self.true_alpha.resize(nrays, f64::NAN);
+        self.corr.resize(nrays, Correspondence::default());
+        let nan_point = Point {
+            p: [f64::NAN, f64::NAN],
+            rho: f64::NAN,
+            phi: f64::NAN,
+        };
+        self.points.resize(nrays, nan_point);
+        self.points_w.resize(nrays, nan_point);
+        self.up_bigger.resize(nrays, 0);
+        self.up_smaller.resize(nrays, 0);
+        self.down_bigger.resize(nrays, 0);
+        self.down_smaller.resize(nrays, 0);
+        self.reset_derived();
+    }
+
+    pub(crate) fn reset_derived(&mut self) {
+        self.cluster.fill(-1);
+        self.alpha.fill(f64::NAN);
+        self.cov_alpha.fill(f64::NAN);
+        self.alpha_valid.fill(false);
+        self.corr.fill(Default::default());
+    }
+
+    /// Mark valid rays outside `(min_reading, max_reading]` as invalid.
+    ///
+    pub fn invalid_if_outside(&mut self, min_reading: f64, max_reading: f64) {
+        for i in 0..self.nrays {
+            if !self.valid[i] {
+                continue;
+            }
+            let r = self.readings[i];
+            if r <= min_reading || r > max_reading {
+                self.valid[i] = false;
+            }
+        }
+    }
+
+    /// Polar → cartesian in the scan frame, for *all* rays (no
+    /// validity check, so NaN readings yield NaN points). `rho`/`phi` of
+    /// `points` are set to NaN.
+    ///
+    pub fn compute_cartesian(&mut self) {
+        for i in 0..self.nrays {
+            self.points[i].p[0] = self.theta[i].cos() * self.readings[i];
+            self.points[i].p[1] = self.theta[i].sin() * self.readings[i];
+            self.points[i].rho = f64::NAN;
+            self.points[i].phi = f64::NAN;
+        }
+    }
+
+    /// Transform `points` into the world frame under `pose` (valid rays
+    /// only), then compute `rho`/`phi` of `points_w` for *all* rays.
+    ///
+    pub fn compute_world_coords(&mut self, pose: &[f64; 3]) {
+        let (px, py, theta) = (pose[0], pose[1], pose[2]);
+        let (c, s) = (theta.cos(), theta.sin());
+        for i in 0..self.nrays {
+            if !self.valid[i] {
+                continue;
+            }
+            let (x0, y0) = (self.points[i].p[0], self.points[i].p[1]);
+            self.points_w[i].p[0] = c * x0 - s * y0 + px;
+            self.points_w[i].p[1] = s * x0 + c * y0 + py;
+        }
+        for i in 0..self.nrays {
+            let (x, y) = (self.points_w[i].p[0], self.points_w[i].p[1]);
+            self.points_w[i].rho = (x * x + y * y).sqrt();
+            self.points_w[i].phi = y.atan2(x);
+        }
+    }
+
+    /// Invalidate points hidden from a viewpoint when their bearing reverses
+    /// along the scan order. Only the viewpoint translation is used; the pose
+    /// angle is intentionally ignored.
+    #[cfg(test)]
+    pub fn visibility_test(&mut self, viewpoint: &[f64; 3]) {
+        let mut theta_from_viewpoint = vec![f64::NAN; self.nrays];
+        self.visibility_test_with_scratch(viewpoint, &mut theta_from_viewpoint);
+    }
+
+    /// Allocation-free [`Self::visibility_test`] using a caller-owned buffer.
+    pub fn visibility_test_with_scratch(
+        &mut self,
+        viewpoint: &[f64; 3],
+        theta_from_viewpoint: &mut Vec<f64>,
+    ) {
+        theta_from_viewpoint.clear();
+        theta_from_viewpoint.resize(self.nrays, f64::NAN);
+        for (i, angle) in theta_from_viewpoint.iter_mut().enumerate() {
+            if !self.valid[i] {
+                continue;
+            }
+            *angle = (viewpoint[1] - self.points[i].p[1]).atan2(viewpoint[0] - self.points[i].p[0]);
+        }
+
+        for i in 1..self.nrays {
+            if !self.valid[i] || !self.valid[i - 1] {
+                continue;
+            }
+            if theta_from_viewpoint[i] < theta_from_viewpoint[i - 1] {
+                self.valid[i] = false;
+            }
+        }
+    }
+
+    /// Build the four jump tables used by the tricks correspondence search.
+    ///
+    pub fn create_jump_tables(&mut self) {
+        for i in 0..self.nrays {
+            let mut j = i as i32 + 1;
+            while (j as usize) < self.nrays
+                && self.valid[j as usize]
+                && self.readings[j as usize] <= self.readings[i]
+            {
+                j += 1;
+            }
+            self.up_bigger[i] = j - i as i32;
+
+            let mut j = i as i32 + 1;
+            while (j as usize) < self.nrays
+                && self.valid[j as usize]
+                && self.readings[j as usize] >= self.readings[i]
+            {
+                j += 1;
+            }
+            self.up_smaller[i] = j - i as i32;
+
+            let mut j = i as i32 - 1;
+            while j >= 0 && self.valid[j as usize] && self.readings[j as usize] >= self.readings[i]
+            {
+                j -= 1;
+            }
+            self.down_smaller[i] = j - i as i32;
+
+            let mut j = i as i32 - 1;
+            while j >= 0 && self.valid[j as usize] && self.readings[j as usize] <= self.readings[i]
+            {
+                j -= 1;
+            }
+            self.down_bigger[i] = j - i as i32;
+        }
+    }
+
+    /// Cluster consecutive valid rays whose readings jump by less than
+    /// `threshold`. Invalid rays get cluster -1; `last_reading` survives
+    /// invalid rays.
+    ///
+    pub fn simple_clustering(&mut self, threshold: f64) {
+        let mut cluster: i32 = -1;
+        let mut last_reading = 0.0;
+        for i in 0..self.nrays {
+            if !self.valid[i] {
+                self.cluster[i] = -1;
+                continue;
+            }
+            if cluster == -1 {
+                cluster = 0;
+            } else if (last_reading - self.readings[i]).abs() > threshold {
+                cluster += 1;
+            }
+            self.cluster[i] = cluster;
+            last_reading = self.readings[i];
+        }
+    }
+
+    /// Neighbour ray indexes for orientation estimation: up to `max_num` valid
+    /// same-cluster rays ascending, then descending. The asymmetric index
+    /// bounds (`up + 1 <= i + max_num` vs `down >= i - max_num`) are preserved
+    /// for floating-point fidelity.
+    #[cfg(test)]
+    fn find_neighbours(&self, i: usize, max_num: i32) -> Vec<usize> {
+        let mut indexes = Vec::new();
+        self.find_neighbours_into(i, max_num, &mut indexes);
+        indexes
+    }
+
+    fn find_neighbours_into(&self, i: usize, max_num: i32, indexes: &mut Vec<usize>) {
+        indexes.clear();
+        let i32_i = i as i32;
+        let mut up = i32_i;
+        while up < i32_i + max_num
+            && (up + 1) < self.nrays as i32
+            && self.valid[(up + 1) as usize]
+            && self.cluster[(up + 1) as usize] == self.cluster[i]
+        {
+            up += 1;
+            indexes.push(up as usize);
+        }
+        let mut down = i32_i;
+        while down >= i32_i - max_num
+            && down > 0
+            && self.valid[(down - 1) as usize]
+            && self.cluster[(down - 1) as usize] == self.cluster[i]
+        {
+            down -= 1;
+            indexes.push(down as usize);
+        }
+    }
+
+    /// Estimate the local surface orientation at each valid, clustered ray.
+    /// Requires `cluster` to be set (see [`Self::simple_clustering`]).
+    ///
+    #[cfg(test)]
+    pub fn compute_orientation(&mut self, size_neighbourhood: i32, sigma: f64) {
+        let mut scratch = OrientationScratch::new(size_neighbourhood);
+        self.compute_orientation_with_scratch(size_neighbourhood, sigma, &mut scratch);
+    }
+
+    /// Allocation-free [`Self::compute_orientation`] using caller-owned scratch.
+    pub(crate) fn compute_orientation_with_scratch(
+        &mut self,
+        size_neighbourhood: i32,
+        sigma: f64,
+        scratch: &mut OrientationScratch,
+    ) {
+        scratch.prepare(size_neighbourhood);
+        for i in 0..self.nrays {
+            if !self.valid[i] || self.cluster[i] == -1 {
+                self.alpha[i] = f64::NAN;
+                self.cov_alpha[i] = f64::NAN;
+                self.alpha_valid[i] = false;
+                continue;
+            }
+            self.find_neighbours_into(i, size_neighbourhood, &mut scratch.neighbours);
+            let n = scratch.neighbours.len();
+            if n == 0 {
+                self.alpha[i] = f64::NAN;
+                self.cov_alpha[i] = f64::NAN;
+                self.alpha_valid[i] = false;
+                continue;
+            }
+            for (k, &j) in scratch.neighbours.iter().enumerate() {
+                scratch.thetas[k] = self.theta[j];
+                scratch.rhos[k] = self.readings[j];
+            }
+            let OrientationScratch {
+                thetas,
+                rhos,
+                y,
+                r,
+                rrt,
+                lu,
+                perm,
+                erinv,
+                erinv_y,
+                b,
+                ..
+            } = scratch;
+            let (alpha, cov0_alpha) = filter_orientation_into(
+                self.theta[i],
+                self.readings[i],
+                &thetas[..n],
+                &rhos[..n],
+                y,
+                r,
+                rrt,
+                lu,
+                perm,
+                erinv,
+                erinv_y,
+                b,
+            );
+            if alpha.is_nan() {
+                self.alpha[i] = f64::NAN;
+                self.cov_alpha[i] = f64::NAN;
+                self.alpha_valid[i] = false;
+            } else {
+                self.alpha[i] = alpha;
+                self.cov_alpha[i] = cov0_alpha * sigma * sigma;
+                self.alpha_valid[i] = true;
+            }
+        }
+    }
+
+    /// Structural validation of the scan.
+    ///
+    pub fn validate(&self) -> Result<(), ScanError> {
+        use ScanError as E;
+
+        // Every per-ray array is allocated together. Rust
+        // callers can mutate the public vectors, so check their shape before
+        // any indexed access below. This keeps malformed input an error rather
+        // than an indexing panic at the public matcher boundary.
+        for (field, actual) in [
+            ("theta", self.theta.len()),
+            ("valid", self.valid.len()),
+            ("readings", self.readings.len()),
+            ("readings_sigma", self.readings_sigma.len()),
+            ("cluster", self.cluster.len()),
+            ("alpha", self.alpha.len()),
+            ("cov_alpha", self.cov_alpha.len()),
+            ("alpha_valid", self.alpha_valid.len()),
+            ("true_alpha", self.true_alpha.len()),
+            ("corr", self.corr.len()),
+            ("points", self.points.len()),
+            ("points_w", self.points_w.len()),
+            ("up_bigger", self.up_bigger.len()),
+            ("up_smaller", self.up_smaller.len()),
+            ("down_bigger", self.down_bigger.len()),
+            ("down_smaller", self.down_smaller.len()),
+        ] {
+            if actual != self.nrays {
+                return Err(E::InconsistentLengths {
+                    field,
+                    expected: self.nrays,
+                    actual,
+                });
+            }
+        }
+
+        // The reading count is not capped at 10,000, but callers may
+        // use larger industrial scans; allocation is bounded by the input.
+        if self.nrays < 10 {
+            return Err(E::NraysOutOfRange);
+        }
+        if self.min_theta.is_nan() || self.max_theta.is_nan() {
+            return Err(E::NanThetaBounds);
+        }
+        let fov = self.max_theta - self.min_theta;
+        if fov < 20.0f64.to_radians() || fov > 2.01 * std::f64::consts::PI {
+            return Err(E::FovOutOfRange);
+        }
+        if (self.min_theta - self.theta[0]).abs() > 1e-8
+            || (self.max_theta - self.theta[self.nrays - 1]).abs() > 1e-8
+        {
+            return Err(E::ThetaBoundsMismatch);
+        }
+        for i in 0..self.nrays {
+            if self.valid[i] {
+                let r = self.readings[i];
+                if r.is_nan() || self.theta[i].is_nan() || !(0.0 < r && r < 100.0) {
+                    return Err(E::BadValidRay(i));
+                }
+            } else {
+                if self.theta[i].is_nan() {
+                    return Err(E::BadValidRay(i));
+                }
+                if self.cluster[i] != -1 {
+                    return Err(E::BadCluster(i));
+                }
+            }
+            if self.cluster[i] < -1 {
+                return Err(E::BadCluster(i));
+            }
+            if !self.readings_sigma[i].is_nan() && self.readings_sigma[i] < 0.0 {
+                return Err(E::NegativeSigma(i));
+            }
+        }
+        let num_valid = self.valid.iter().filter(|&&v| v).count();
+        // Compare in floating point: num_valid < nrays * 0.10
+        if (num_valid as f64) < self.nrays as f64 * 0.10 {
+            return Err(E::TooFewValidRays);
+        }
+        Ok(())
+    }
+}
+
+/// Input validation failures, mirroring the `sm_error` checks in
+/// Validation. Malformed input is an error; a failed *match* is not.
+///
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ScanError {
+    /// An in-place prepared update exceeds the workspace capacity.
+    CapacityExceeded {
+        capacity: usize,
+        requested: usize,
+    },
+    /// A per-ray field does not contain exactly `nrays` entries.
+    InconsistentLengths {
+        /// Name of the field with the wrong length.
+        field: &'static str,
+        /// Required length, taken from `nrays`.
+        expected: usize,
+        /// Actual vector length.
+        actual: usize,
+    },
+    /// At least 10 rays are required. There is no artificial upper bound.
+    NraysOutOfRange,
+    NanThetaBounds,
+    FovOutOfRange,
+    ThetaBoundsMismatch,
+    BadValidRay(usize),
+    BadCluster(usize),
+    NegativeSigma(usize),
+    TooFewValidRays,
+    /// Two adjacent valid beams have the same bearing.
+    DuplicateBearing(usize),
+    /// A valid Cartesian point has a non-finite supplied bearing.
+    NonFiniteBearing(usize),
+    /// The requested initial pose contains a non-finite component.
+    NonFiniteGuess,
+}
+
+impl std::fmt::Display for ScanError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::CapacityExceeded {
+                capacity,
+                requested,
+            } => {
+                write!(
+                    f,
+                    "prepared capacity {capacity} is smaller than requested {requested}"
+                )
+            }
+            Self::InconsistentLengths {
+                field,
+                expected,
+                actual,
+            } => write!(
+                f,
+                "{field} has {actual} entries but nrays requires {expected}"
+            ),
+            Self::NraysOutOfRange => write!(f, "invalid number of rays (need at least 10)"),
+            Self::NanThetaBounds => write!(f, "NaN min/max theta"),
+            Self::FovOutOfRange => write!(f, "FOV outside [20 deg, 2.01 pi]"),
+            Self::ThetaBoundsMismatch => {
+                write!(f, "min/max theta do not match theta[0]/theta[last]")
+            }
+            Self::BadValidRay(i) => {
+                write!(f, "ray #{i}: NaN or out-of-(0,100) reading on valid ray")
+            }
+            Self::BadCluster(i) => write!(f, "ray #{i}: bad cluster value"),
+            Self::NegativeSigma(i) => write!(f, "ray #{i}: negative readings_sigma"),
+            Self::TooFewValidRays => write!(f, "fewer than 10% valid rays"),
+            Self::DuplicateBearing(i) => write!(f, "ray #{i}: duplicate bearing"),
+            Self::NonFiniteBearing(i) => write!(f, "ray #{i}: non-finite bearing on a valid point"),
+            Self::NonFiniteGuess => write!(f, "initial pose contains a non-finite value"),
+        }
+    }
+}
+
+impl std::error::Error for ScanError {}
+
+/// Reusable scratch for the optional orientation filter. Sized once from the
+/// configured neighbourhood so prepared matching never allocates for it.
+pub(crate) struct OrientationScratch {
+    max_n: usize,
+    neighbours: Vec<usize>,
+    thetas: Vec<f64>,
+    rhos: Vec<f64>,
+    y: Vec<f64>,
+    r: Vec<f64>,
+    rrt: Vec<f64>,
+    lu: Vec<f64>,
+    perm: Vec<usize>,
+    erinv: Vec<f64>,
+    erinv_y: Vec<f64>,
+    b: Vec<f64>,
+}
+
+impl OrientationScratch {
+    pub(crate) fn new(size_neighbourhood: i32) -> Self {
+        let max_n = 2 * size_neighbourhood.max(0) as usize + 1;
+        Self {
+            max_n,
+            neighbours: Vec::with_capacity(max_n),
+            thetas: vec![0.0; max_n],
+            rhos: vec![0.0; max_n],
+            y: vec![0.0; max_n],
+            r: vec![0.0; max_n * (max_n + 1)],
+            rrt: vec![0.0; max_n * max_n],
+            lu: vec![0.0; max_n * max_n],
+            perm: vec![0; max_n],
+            erinv: vec![0.0; max_n * max_n],
+            erinv_y: vec![0.0; max_n],
+            b: vec![0.0; max_n],
+        }
+    }
+
+    fn prepare(&mut self, size_neighbourhood: i32) {
+        let max_n = 2 * size_neighbourhood.max(0) as usize + 1;
+        if max_n > self.max_n {
+            *self = Self::new(size_neighbourhood);
+        }
+    }
+}
+
+/// Weighted least-squares orientation filter. Returns `(alpha, cov0_alpha)`;
+/// `alpha` is NaN when the system is singular.
+///
+/// `Y = L·f1 + R·ε` with `L = ones(n)`, solved via the n×n inverse of
+/// `R·Rᵀ` with [`crate::math::invert_flat_into`].
+#[allow(clippy::too_many_arguments)]
+fn filter_orientation_into(
+    theta0: f64,
+    rho0: f64,
+    thetas: &[f64],
+    rhos: &[f64],
+    y: &mut [f64],
+    r: &mut [f64],
+    rrt: &mut [f64],
+    lu: &mut [f64],
+    perm: &mut [usize],
+    erinv: &mut [f64],
+    erinv_y: &mut [f64],
+    b: &mut [f64],
+) -> (f64, f64) {
+    let n = thetas.len();
+    // Y[i] = (rho_i - rho0) / (theta_i - theta0)
+    // R[i,0] = -1/(theta_i - theta0), R[i,i+1] = +1/(theta_i - theta0)
+    r[..n * (n + 1)].fill(0.0);
+    for i in 0..n {
+        let dt = thetas[i] - theta0;
+        y[i] = (rhos[i] - rho0) / dt;
+        r[i * (n + 1)] = -1.0 / dt;
+        r[i * (n + 1) + i + 1] = 1.0 / dt;
+    }
+    for i in 0..n {
+        for j in 0..n {
+            rrt[i * n + j] = (0..=n)
+                .map(|k| r[i * (n + 1) + k] * r[j * (n + 1) + k])
+                .sum();
+        }
+    }
+    if !crate::math::invert_flat_into(
+        &rrt[..n * n],
+        n,
+        &mut lu[..n * n],
+        &mut perm[..n],
+        &mut b[..n],
+        &mut erinv[..n * n],
+    ) {
+        return (f64::NAN, f64::NAN);
+    }
+    // L = ones(n): Lᵀ·eRinv·L is the sum of all entries (scalar);
+    // Lᵀ·eRinv·Y is the sum of entries of eRinv·Y (scalar).
+    let mut sum_all = 0.0;
+    for i in 0..n {
+        erinv_y[i] = 0.0;
+        for j in 0..n {
+            let e = erinv[i * n + j];
+            sum_all += e;
+            erinv_y[i] += e * y[j];
+        }
+    }
+    if sum_all == 0.0 {
+        return (f64::NAN, f64::NAN);
+    }
+    let cov_f1 = 1.0 / sum_all;
+    let f1 = cov_f1 * erinv_y[..n].iter().sum::<f64>();
+
+    let mut alpha = theta0 - (f1 / rho0).atan();
+    if alpha.cos() * theta0.cos() + alpha.sin() * theta0.sin() > 0.0 {
+        alpha += std::f64::consts::PI;
+    }
+
+    let denom = rho0 * rho0 + f1 * f1;
+    let dalpha_df1 = rho0 / denom;
+    let dalpha_drho = -f1 / denom;
+    let cov0_alpha = dalpha_df1 * dalpha_df1 * cov_f1 + dalpha_drho * dalpha_drho;
+
+    (alpha, cov0_alpha)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A valid scan: 100 rays over 180°, all valid,
+    /// readings in (0, 100).
+    fn valid_scan() -> ScanData {
+        let mut ld = ScanData::new(100, -1.5, 1.5);
+        for i in 0..100 {
+            ld.valid[i] = true;
+            ld.readings[i] = 5.0;
+        }
+        ld
+    }
+
+    #[test]
+    fn validate_accepts_well_formed_scan() {
+        assert!(valid_scan().validate().is_ok());
+    }
+
+    #[test]
+    fn validate_rejects_too_few_rays() {
+        let ld = ScanData::new(5, -1.0, 1.0);
+        assert!(matches!(ld.validate(), Err(ScanError::NraysOutOfRange)));
+    }
+
+    #[test]
+    fn validate_rejects_narrow_fov() {
+        let mut ld = ScanData::new(100, 0.0, 0.1);
+        for i in 0..100 {
+            ld.valid[i] = true;
+            ld.readings[i] = 5.0;
+        }
+        assert!(matches!(ld.validate(), Err(ScanError::FovOutOfRange)));
+    }
+
+    #[test]
+    fn validate_rejects_theta_bounds_mismatch() {
+        let mut ld = valid_scan();
+        ld.min_theta = ld.theta[0] + 1e-6;
+        assert!(matches!(ld.validate(), Err(ScanError::ThetaBoundsMismatch)));
+    }
+
+    #[test]
+    fn validate_rejects_nan_reading_on_valid_ray() {
+        let mut ld = valid_scan();
+        ld.readings[42] = f64::NAN;
+        assert!(matches!(ld.validate(), Err(ScanError::BadValidRay(42))));
+    }
+
+    #[test]
+    fn validate_rejects_reading_outside_sensor_range() {
+        let mut ld = valid_scan();
+        ld.readings[7] = 150.0;
+        assert!(matches!(ld.validate(), Err(ScanError::BadValidRay(7))));
+    }
+
+    #[test]
+    fn validate_rejects_cluster_on_invalid_ray() {
+        let mut ld = valid_scan();
+        ld.valid[3] = false;
+        ld.cluster[3] = 2;
+        assert!(matches!(ld.validate(), Err(ScanError::BadCluster(3))));
+    }
+
+    #[test]
+    fn validate_rejects_negative_sigma() {
+        let mut ld = valid_scan();
+        ld.readings_sigma[9] = -1.0;
+        assert!(matches!(ld.validate(), Err(ScanError::NegativeSigma(9))));
+    }
+
+    #[test]
+    fn invalid_if_outside_marks_rays() {
+        let mut ld = valid_scan();
+        ld.readings[0] = 0.5; // below min
+        ld.readings[1] = 5.0; // inside
+        ld.readings[2] = 10.0; // above max (strictly greater)
+        ld.readings[3] = 2.0; // boundary: equal to min -> invalid (r <= min)
+        ld.readings[4] = 7.0; // boundary: equal to max -> stays valid
+        ld.invalid_if_outside(2.0, 7.0);
+        assert!(!ld.valid[0]);
+        assert!(ld.valid[1]);
+        assert!(!ld.valid[2]);
+        assert!(!ld.valid[3]);
+        assert!(ld.valid[4]);
+    }
+
+    #[test]
+    fn compute_cartesian_fills_all_rays_polar_nan() {
+        let mut ld = ScanData::new(10, 0.0, 1.0);
+        for i in 0..10 {
+            ld.valid[i] = true;
+        }
+        ld.readings[0] = 2.0;
+        ld.theta[0] = 0.0;
+        ld.compute_cartesian();
+        assert!((ld.points[0].p[0] - 2.0).abs() < 1e-15);
+        assert!((ld.points[0].p[1] - 0.0).abs() < 1e-15);
+        assert!(ld.points[0].rho.is_nan() && ld.points[0].phi.is_nan());
+        // NaN readings propagate to NaN points (no valid check)
+        assert!(ld.points[5].p[0].is_nan());
+    }
+
+    #[test]
+    fn compute_world_coords_transforms_valid_rays_only() {
+        // rho/phi computed for ALL rays
+        let mut ld = ScanData::new(10, -1.0, 1.0);
+        ld.valid[0] = true;
+        ld.readings[0] = 2.0;
+        ld.theta[0] = 0.0;
+        ld.min_theta = ld.theta[0];
+        ld.compute_cartesian();
+        let pose = [1.0, 1.0, std::f64::consts::FRAC_PI_2];
+        ld.compute_world_coords(&pose);
+        // point (2,0) rotated by pi/2 then translated by (1,1) -> (1, 3)
+        assert!((ld.points_w[0].p[0] - 1.0).abs() < 1e-12);
+        assert!((ld.points_w[0].p[1] - 3.0).abs() < 1e-12);
+        assert!((ld.points_w[0].rho - (10.0f64).sqrt()).abs() < 1e-12);
+        assert!((ld.points_w[0].phi - 3.0f64.atan2(1.0)).abs() < 1e-12);
+        // invalid ray: p untouched (stays NaN from alloc)
+        assert!(ld.points_w[5].p[0].is_nan());
+    }
+
+    #[test]
+    fn visibility_test_invalidates_bearing_reversals() {
+        let mut ld = ScanData::new(10, -1.0, 1.0);
+        for i in 0..ld.nrays {
+            ld.valid[i] = true;
+            let angle = if i == 5 { -1.0 } else { -1.0 + 0.2 * i as f64 };
+            ld.points[i].p = [-angle.cos(), -angle.sin()];
+        }
+
+        ld.visibility_test(&[0.0, 0.0, 7.0]);
+
+        assert!((0..10).filter(|&i| !ld.valid[i]).eq([5]));
+    }
+
+    #[test]
+    fn jump_tables_hand_computed_example() {
+        // Worked example, computed by hand:
+        // readings = [3, 1, 2, 2, 5, 4], all valid
+        let mut ld = ScanData::new(6, -0.5, 0.5);
+        for (i, &r) in [3.0, 1.0, 2.0, 2.0, 5.0, 4.0].iter().enumerate() {
+            ld.valid[i] = true;
+            ld.readings[i] = r;
+        }
+        ld.create_jump_tables();
+        assert_eq!(ld.up_bigger, [4, 1, 2, 1, 2, 1]);
+        assert_eq!(ld.up_smaller, [1, 5, 4, 3, 1, 1]);
+        assert_eq!(ld.down_smaller, [-1, -2, -1, -2, -1, -2]);
+        assert_eq!(ld.down_bigger, [-1, -1, -2, -3, -5, -1]);
+    }
+
+    #[test]
+    fn jump_tables_stop_at_invalid_rays() {
+        let mut ld = ScanData::new(10, -1.0, 1.0);
+        for i in 0..10 {
+            ld.valid[i] = true;
+            ld.readings[i] = 5.0;
+        }
+        ld.valid[4] = false;
+        ld.create_jump_tables();
+        // From ray 0, up_bigger walks while readings[j] <= 5.0 — stops at j=4 (invalid)
+        assert_eq!(ld.up_bigger[0], 4);
+        // From ray 9, down_bigger walks while readings[j] <= 4.0+... stops at j=4
+        assert_eq!(ld.down_bigger[9], 4 - 9);
+    }
+
+    #[test]
+    fn simple_clustering_splits_on_jumps() {
+        // Worked: readings [1, 1.01, 3, 3.02, 1], threshold 0.05 -> [0,0,1,1,2]
+        let mut ld = ScanData::new(10, -1.0, 1.0);
+        for (i, &r) in [1.0, 1.01, 3.0, 3.02, 1.0].iter().enumerate() {
+            ld.valid[i] = true;
+            ld.readings[i] = r;
+        }
+        ld.simple_clustering(0.05);
+        assert_eq!(&ld.cluster[..5], &[0, 0, 1, 1, 2]);
+        // untouched (invalid) rays get cluster -1
+        assert!(ld.cluster[5..].iter().all(|&c| c == -1));
+    }
+
+    #[test]
+    fn simple_clustering_bridges_invalid_rays() {
+        // last_reading survives invalid rays, so [1, X, 1.01]
+        // with threshold 0.05 stays one cluster: [0, -1, 0]
+        let mut ld = ScanData::new(10, -1.0, 1.0);
+        ld.valid[0] = true;
+        ld.readings[0] = 1.0;
+        ld.valid[2] = true;
+        ld.readings[2] = 1.01;
+        ld.simple_clustering(0.05);
+        assert_eq!(&ld.cluster[..3], &[0, -1, 0]);
+    }
+
+    #[test]
+    fn find_neighbours_walks_cluster_both_ways() {
+        // Worked: 10 valid rays, one cluster, max_num=2, i=5
+        // ups first (ascending), then downs (descending); the down-walk
+        // condition is checked before decrementing, so it yields max_num+1
+        // downs: [6,7,4,3,2]
+        let mut ld = ScanData::new(10, -1.0, 1.0);
+        for i in 0..10 {
+            ld.valid[i] = true;
+            ld.readings[i] = 5.0;
+            ld.cluster[i] = 0;
+        }
+        assert_eq!(ld.find_neighbours(5, 2), vec![6, 7, 4, 3, 2]);
+        // boundary: i=0 has no downs
+        assert_eq!(ld.find_neighbours(0, 2), vec![1, 2]);
+    }
+
+    #[test]
+    fn find_neighbours_stops_at_cluster_change() {
+        let mut ld = ScanData::new(10, -1.0, 1.0);
+        for i in 0..10 {
+            ld.valid[i] = true;
+            ld.readings[i] = 5.0;
+        }
+        for i in 0..6 {
+            ld.cluster[i] = 0;
+        }
+        for i in 6..10 {
+            ld.cluster[i] = 1;
+        }
+        assert_eq!(ld.find_neighbours(5, 2), vec![4, 3, 2]);
+    }
+
+    #[test]
+    fn compute_orientation_matches_c_reference() {
+        // Ground truth: wall y=2, 181 rays over
+        // [0.2, pi-0.2], one cluster, neighbourhood 3, sigma 0.01.
+        let nrays = 181;
+        let (tmin, tmax) = (0.2, std::f64::consts::PI - 0.2);
+        let mut ld = ScanData::new(nrays, tmin, tmax);
+        for i in 0..nrays {
+            ld.valid[i] = true;
+            ld.readings[i] = 2.0 / ld.theta[i].sin();
+        }
+        ld.simple_clustering(1000.0);
+        ld.compute_orientation(3, 0.01);
+        // (ray, alpha, cov_alpha) as produced by the reference
+        let expected: [(usize, f64, f64); 7] = [
+            (0, 4.667_736_996_433_337, 2.982_699_741_012_538e-6),
+            (30, 4.72744521612307, 0.00012508773117607194),
+            (60, 4.7224561370844995, 0.00131686988590062),
+            (90, 4.720_018_376_251_946, 0.002_565_544_549_570_049),
+            (120, 4.720559304653337, 0.001_364_778_643_113_702),
+            (150, 4.722188768107566, 0.00014216371217088818),
+            (180, 4.772_113_047_180_021, 1.9109700429176555e-06),
+        ];
+        for (i, alpha, cov) in expected {
+            assert!(ld.alpha_valid[i], "ray {i} should have valid alpha");
+            assert!(
+                (ld.alpha[i] - alpha).abs() < 1e-9,
+                "ray {i}: alpha {} vs expected {}",
+                ld.alpha[i],
+                alpha
+            );
+            assert!(
+                (ld.cov_alpha[i] - cov).abs() / cov < 1e-6,
+                "ray {i}: cov_alpha {} vs expected {}",
+                ld.cov_alpha[i],
+                cov
+            );
+        }
+    }
+
+    #[test]
+    fn validate_rejects_too_few_valid_rays() {
+        let mut ld = ScanData::new(100, -1.5, 1.5);
+        for i in 0..5 {
+            ld.valid[i] = true;
+            ld.readings[i] = 5.0;
+        }
+        assert!(matches!(ld.validate(), Err(ScanError::TooFewValidRays)));
+    }
+
+    #[test]
+    fn new_mirrors_ld_alloc_initialization() {
+        let ld = ScanData::new(11, -1.0, 1.0);
+        assert_eq!(ld.nrays, 11);
+        // theta linearly spaced, endpoints exact (theta[0] == min_theta)
+        assert_eq!(ld.theta[0], -1.0);
+        assert_eq!(ld.theta[10], 1.0);
+        assert!((ld.theta[5] - 0.0).abs() < 1e-15);
+        assert!(ld.valid.iter().all(|&v| !v));
+        assert!(ld.readings.iter().all(|r| r.is_nan()));
+        assert!(ld.cluster.iter().all(|&c| c == -1));
+        assert!(ld.corr.iter().all(|c| !c.valid && c.j1 == -1 && c.j2 == -1));
+        assert!(ld.points.iter().all(|p| p.p[0].is_nan() && p.rho.is_nan()));
+    }
+}
