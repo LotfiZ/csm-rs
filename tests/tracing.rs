@@ -17,12 +17,8 @@ fn scan(n: usize, phase: f64) -> PreparedPolarScan {
 #[test]
 fn traced_and_uninstrumented_matches_agree() {
     let matcher = Matcher::new(Params::default()).unwrap();
-    let mut plain = matcher
-        .prepare(scan(120, 0.0), scan(120, 0.0))
-        .unwrap();
-    let mut traced = matcher
-        .prepare(scan(120, 0.0), scan(120, 0.0))
-        .unwrap();
+    let mut plain = matcher.prepare(scan(120, 0.0), scan(120, 0.0)).unwrap();
+    let mut traced = matcher.prepare(scan(120, 0.0), scan(120, 0.0)).unwrap();
 
     let plain_outcome = plain.match_once().unwrap();
     let mut snapshots = Vec::new();
@@ -41,7 +37,10 @@ fn traced_and_uninstrumented_matches_agree() {
         assert!((a - b).abs() < 1e-12, "traced pose diverged: {a} != {b}");
     }
 
-    assert!(!snapshots.is_empty(), "traces should contain real iterations");
+    assert!(
+        !snapshots.is_empty(),
+        "traces should contain real iterations"
+    );
     let total: usize = snapshots
         .iter()
         .map(|snapshot| snapshot.correspondences.len())
@@ -67,9 +66,7 @@ fn restart_iterations_are_marked() {
     params.restart.enabled = true;
     params.restart.threshold_mean_error = 0.0;
     let matcher = Matcher::new(params).unwrap();
-    let mut workspace = matcher
-        .prepare(scan(120, 0.0), scan(120, 0.02))
-        .unwrap();
+    let mut workspace = matcher.prepare(scan(120, 0.0), scan(120, 0.02)).unwrap();
     let mut saw_restart = false;
     workspace
         .match_once_traced(|snapshot| {

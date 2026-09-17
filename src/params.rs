@@ -1,44 +1,37 @@
-//! Match parameters: the validation configuration surface.
+//! Match parameters.
 //!
-//! C: `struct sm_params` in `sm/csm/algos.h`; defaults in `sm/csm/sm_options.c`
-//!
-//! Every field documents its C counterpart. Grouped into sub-structs with
-//! `Default` impls transcribed from `sm_options.c`. Strategy enums replace
-//! C's boolean flags; phase-2 enhancements arrive as new enum variants
-//!
+//! Grouped into sub-structs with `Default` impls. Boolean strategy switches
+//! are represented as enums.
 
 /// Correspondence search strategy.
 ///
-/// C: `sm_params.use_corr_tricks` (bool)
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum CorrespondenceSearch {
-    /// Jump-table search, O(1)-ish per ray. C: `find_correspondences_tricks()`
+    /// Jump-table search, O(1)-ish per ray.
     #[default]
     Tricks,
-    /// Naive full scan. C: `find_correspondences()`
+    /// Naive full scan.
     Naive,
 }
 
 /// Distance metric minimized by the solver.
 ///
-/// C: `sm_params.use_point_to_line_distance` (bool)
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum DistanceMetric {
-    /// Point-to-line (PlICP). C: `use_point_to_line_distance = 1`
+    /// Point-to-line (PlICP).
     #[default]
     PointToLine,
-    /// Point-to-point. C: `use_point_to_line_distance = 0`
+    /// Point-to-point.
     PointToPoint,
 }
 
 /// Sensor reading validity interval.
 ///
-/// C: `sm_params.min_reading`, `sm_params.max_reading`
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct ReadingBounds {
-    /// C: `min_reading` (default 0.0)
+    /// Minimum valid reading in metres (default 0.0).
     pub min: f64,
-    /// C: `max_reading` (default 1000.0)
+    /// Maximum valid reading in metres (default 1000.0).
     pub max: f64,
 }
 
@@ -53,12 +46,11 @@ impl Default for ReadingBounds {
 
 /// Maximum per-iteration corrections.
 ///
-/// C: `sm_params.max_angular_correction_deg`, `sm_params.max_linear_correction`
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct CorrectionLimits {
-    /// C: `max_angular_correction_deg` (default 90.0)
+    /// Maximum rotation correction per iteration, in degrees (default 90.0).
     pub max_angular_deg: f64,
-    /// C: `max_linear_correction` (default 2.0)
+    /// Maximum translation correction per iteration, in metres (default 2.0).
     pub max_linear: f64,
 }
 
@@ -73,14 +65,13 @@ impl Default for CorrectionLimits {
 
 /// Stopping criteria.
 ///
-/// C: `sm_params.max_iterations`, `sm_params.epsilon_xy`, `sm_params.epsilon_theta`
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct StoppingCriteria {
-    /// C: `max_iterations` (default 1000)
+    /// Maximum ICP iterations (default 1000).
     pub max_iterations: i32,
-    /// C: `epsilon_xy` (default 0.0001)
+    /// Translation change below which ICP stops, in metres (default 0.0001).
     pub epsilon_xy: f64,
-    /// C: `epsilon_theta` (default 0.0001)
+    /// Rotation change below which ICP stops, in radians (default 0.0001).
     pub epsilon_theta: f64,
 }
 
@@ -96,26 +87,25 @@ impl Default for StoppingCriteria {
 
 /// Correspondence finding configuration.
 ///
-/// C: various `sm_params` fields
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct CorrespondenceParams {
-    /// C: `use_corr_tricks`
+    /// Correspondence search strategy.
     pub search: CorrespondenceSearch,
-    /// C: `use_point_to_line_distance`
+    /// Distance metric minimized by the solver.
     pub metric: DistanceMetric,
-    /// C: `max_correspondence_dist` (default 2.0)
+    /// Maximum correspondence distance in metres (default 2.0).
     pub max_dist: f64,
-    /// C: `sigma` (default 0.01) — "dubious parameter (m)"
+    /// Assumed correspondence noise sigma, in metres (default 0.01).
     pub sigma: f64,
-    /// C: `do_alpha_test` (default 0)
+    /// Enable the surface-orientation compatibility test (default off).
     pub do_alpha_test: bool,
-    /// C: `do_alpha_test_thresholdDeg` (default 20.0)
+    /// Orientation difference allowed by the alpha test, in degrees (default 20.0).
     pub alpha_test_threshold_deg: f64,
-    /// C: `do_visibility_test` (default 0)
+    /// Enable the visibility test (default off).
     pub do_visibility_test: bool,
-    /// C: `clustering_threshold` (default 0.05)
+    /// Distance threshold for clustering adjacent rays, in metres (default 0.05).
     pub clustering_threshold: f64,
-    /// C: `orientation_neighbourhood` (default 3)
+    /// Neighbours used to estimate surface orientation (default 3).
     pub orientation_neighbourhood: i32,
 }
 
@@ -137,24 +127,21 @@ impl Default for CorrespondenceParams {
 
 /// Outlier rejection parameters.
 ///
-/// C: `sm_params.outliers_*`
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct OutlierParams {
-    /// Keep at most this fraction of correspondences (discard highest-error).
-    /// C: `outliers_maxPerc` (default 0.95)
+    /// Keep at most this fraction of correspondences, discarding the
+    /// highest-error ones (default 0.95).
     pub max_perc: f64,
-    /// Percentile for the adaptive threshold. C: `outliers_adaptive_order` (0.7)
+    /// Percentile used for the adaptive error threshold (default 0.7).
     pub adaptive_order: f64,
-    /// Multiplier over the percentile error. C: `outliers_adaptive_mult` (2.0)
+    /// Multiplier applied to the percentile error (default 2.0).
     pub adaptive_mult: f64,
-    /// Forbid two correspondences sharing a reference point.
-    /// C: `outliers_remove_doubles` (1)
+    /// Forbid two correspondences sharing a reference point (default on).
     pub remove_doubles: bool,
 }
 
 impl Default for OutlierParams {
     fn default() -> Self {
-        // C: sm_options.c defaults
         Self {
             max_perc: 0.95,
             adaptive_order: 0.7,
@@ -166,16 +153,16 @@ impl Default for OutlierParams {
 
 /// Restart-from-perturbation configuration.
 ///
-/// C: `sm_params.restart*` — note C's `restart` defaults to **1** (enabled).
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct RestartParams {
-    /// C: `restart` (default 1)
+    /// Enable restart from local perturbations (default on).
     pub enabled: bool,
-    /// C: `restart_threshold_mean_error` (default 0.01)
+    /// Mean correspondence error above which a restart is attempted
+    /// (default 0.01).
     pub threshold_mean_error: f64,
-    /// C: `restart_dt` (default 0.01)
+    /// Translation perturbation for restarts, in metres (default 0.01).
     pub dt: f64,
-    /// C: `restart_dtheta` (default deg2rad(1.5))
+    /// Rotation perturbation for restarts, in radians (default 1.5°).
     pub dtheta: f64,
 }
 
@@ -192,44 +179,36 @@ impl Default for RestartParams {
 
 /// Correspondence weighting schemes.
 ///
-/// C: `sm_params.use_ml_weights`, `sm_params.use_sigma_weights` (both default 0)
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct WeightParams {
-    /// C: `use_ml_weights`
+    /// Maximum-likelihood correspondence weighting.
     pub ml: bool,
-    /// C: `use_sigma_weights`
+    /// Per-ray sigma weighting.
     pub sigma: bool,
 }
 
 /// Top-level match parameters.
 ///
-/// C: `struct sm_params` in `sm/csm/algos.h`
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Params {
     /// Sensor reading interval applied before correspondence search.
-    /// C: `min_reading`, `max_reading`
     pub reading_bounds: ReadingBounds,
     /// Maximum translation and rotation allowed for one correction.
-    /// C: `max_angular_correction_deg`, `max_linear_correction`
     pub correction_limits: CorrectionLimits,
     /// Iteration limit and pose-delta stopping thresholds.
-    /// C: `max_iterations`, `epsilon_xy`, `epsilon_theta`
     pub stopping: StoppingCriteria,
     /// Correspondence strategy, metric, alpha, visibility, and orientation
-    /// settings. C: the corresponding fields of `struct sm_params`.
+    /// settings.
     pub correspondence: CorrespondenceParams,
     /// Duplicate and percentile/adaptive correspondence rejection settings.
-    /// C: `outliers_maxPerc`, `outliers_adaptive_order`,
-    /// `outliers_adaptive_mult`, `outliers_remove_doubles`
     pub outliers: OutlierParams,
-    /// Six-perturbation restart settings. C: `restart*`
+    /// Six-perturbation restart settings.
     pub restart: RestartParams,
     /// ML and per-ray sigma weighting switches.
-    /// C: `use_ml_weights`, `use_sigma_weights`
     pub weights: WeightParams,
-    /// C: `do_compute_covariance` (default 0)
+    /// Compute covariance and derivative outputs (default off).
     pub do_compute_covariance: bool,
-    /// C: `debug_verify_tricks` (default 0)
+    /// Run the smart and naive searches together as a debug check (default off).
     pub debug_verify_tricks: bool,
 }
 
@@ -316,9 +295,8 @@ mod tests {
     use super::*;
 
     #[test]
-    fn defaults_match_sm_options_c() {
-        // Transcribed from sm/csm/sm_options.c — this test pins the
-        // transcription against accidental edits.
+    fn defaults_match_documented_values() {
+        // Pin the documented defaults against accidental edits.
         let p = Params::default();
         assert_eq!(p.reading_bounds.min, 0.0);
         assert_eq!(p.reading_bounds.max, 1000.0);

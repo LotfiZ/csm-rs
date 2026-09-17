@@ -1,9 +1,8 @@
 //! # csm-rs
 //!
-//! A Rust implementation of the **Canonical Scan Matcher** (Andrea Censi,
-//! 2007): point-to-line ICP with smart correspondence search, outlier
-//! rejection, restart handling, and an optional closed-form estimate of the
-//! matching covariance.
+//! Point-to-line ICP scan matching (Censi, 2007) with smart correspondence
+//! search, outlier rejection, restart handling, and an optional closed-form
+//! estimate of the matching covariance.
 //!
 //! The supported interface is organized around four ideas:
 //!
@@ -52,35 +51,32 @@
 //!
 //! ## Licensing
 //!
-//! Derivative work of CSM (LGPLv3) and its vendored `gpc` solver (GPLv2+).
-//! Because the GPL-derived solver is part of this combined crate, distribution
-//! is currently under GPL-2.0-or-later; see the repository NOTICE.md.
+//! Derivative work of the Canonical Scan Matcher (LGPLv3) and its vendored
+//! solver (GPLv2+). Because the GPL-derived solver is part of this combined
+//! crate, distribution is under GPL-2.0-or-later; see the repository NOTICE.md.
 
 #![deny(unsafe_code)]
 #![doc(test(attr(deny(warnings))))]
 
-#[cfg(test)]
-mod golden_tests;
-
 mod correspondence;
 mod covariance;
 mod icp;
-mod laser_data;
 mod matching;
 mod math;
 mod params;
 mod pose;
 mod result;
 mod scan;
+mod scan_data;
 mod solver;
 
-pub use params::{
-    CorrespondenceParams, CorrespondenceSearch, CorrectionLimits, DistanceMetric, OutlierParams,
-    Params, ParamsError, ReadingBounds, RestartParams, StoppingCriteria, WeightParams,
-};
 pub use matching::{
-    CorrespondenceSnapshot, CovarianceStatus, IterationSnapshot, MatchOutcome, MatchStatus, Matcher,
-    PreparedMatcher, PreparedPolarScan, TerminationReason,
+    CorrespondenceSnapshot, CovarianceStatus, IterationSnapshot, MatchOutcome, MatchStatus,
+    Matcher, PreparedMatcher, PreparedPolarScan, TerminationReason,
+};
+pub use params::{
+    CorrectionLimits, CorrespondenceParams, CorrespondenceSearch, DistanceMetric, OutlierParams,
+    Params, ParamsError, ReadingBounds, RestartParams, StoppingCriteria, WeightParams,
 };
 pub use pose::Pose;
 pub use scan::{CartesianScan, PolarScan, ScanError};

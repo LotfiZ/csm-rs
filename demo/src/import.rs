@@ -29,7 +29,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::scene::Scene;
 use crate::simulation::{
-    initial_guess, pose_at, relative_pose, scan_for, guess_rng, SessionRecord, SessionResult,
+    guess_rng, initial_guess, pose_at, relative_pose, scan_for, SessionRecord, SessionResult,
     SimConfig,
 };
 

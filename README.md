@@ -1,52 +1,42 @@
 # csm-rs
 
-A Rust implementation of the **Canonical Scan Matcher** ([Andrea Censi's CSM](https://github.com/AndreaCensi/csm)):
-point-to-line ICP with smart correspondence search, outlier rejection, restart
-handling, and an optional closed-form estimate of the matching covariance
-([Censi, ICRA 2007](https://purl.org/censi/2007/icpcov)).
+[![GPL-2.0-or-later Licensed](https://img.shields.io/badge/license-GPL--2.0--or--later-brightgreen.svg?style=flat-square)](LICENSE-GPL-2.0)
+![CI](https://github.com/LotfiZ/csm-rs/workflows/CI/badge.svg)
 
-The library has no runtime dependencies and is organized around ordered scans,
-validated configuration, matching, and results. It supports ordered polar and
-Cartesian inputs, explicit initial poses, reusable allocation-free workspaces,
-optional covariance/derivative/Fisher-information outputs, and explicit
-termination reasons.
+Point-to-line ICP scan matching (Censi, 2007) with smart correspondence search,
+outlier rejection, restart handling, and an optional closed-form estimate of the
+matching covariance. The library has no runtime dependencies and is built around
+ordered scans, validated configuration, matching, and results.
+
+## Requirements
+
+Rust 1.70 or newer. The library itself has no dependencies.
 
 ## Installation
 
-Add the crate to a Cargo project:
+The crate is not published on crates.io. Add it as a git dependency:
 
 ```toml
 [dependencies]
 csm-rs = { git = "https://github.com/LotfiZ/csm-rs" }
 ```
 
-## Scope
-
-Supported: the `sm_icp` path (ICP/PlICP with correspondence search, outlier
-rejection, orientation/visibility handling, weighting, restart, covariance,
-and Fisher information). Not supported: GPM/HSM/MbICP, Cairo drawing, the CLI
-apps, arbitrary unordered point clouds, public hosting/WebAssembly, and
-microcontroller or `no_std` targets. Port history and the pre-remaster
-numerical baseline are in [docs/contributing.md](docs/contributing.md).
-
 ## Quick start
-
-The supported interface is arranged around scans, configuration, matching, and
-results. A minimal match borrows caller-owned buffers and uses an identity
-initial pose:
 
 ```rust
 use csm_rs::{Matcher, Params, PolarScan};
 
-fn match_scans(
-    angles: &[f64],
-    reference_readings: &[f64],
-    sensor_readings: &[f64],
-    valid: &[bool],
-) -> Result<(), Box<dyn std::error::Error>> {
-    let reference = PolarScan::new(angles, reference_readings, valid)?;
-    let sensor = PolarScan::new(angles, sensor_readings, valid)?;
-    let outcome = Matcher::new(Params::default())?.match_polar(reference, sensor)?;
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    // Ordered polar scan: 21 rays from -1 rad to 1 rad.
+    let angles: Vec<f64> = (0..21).map(|i| -1.0 + i as f64 * 0.1).collect();
+    let readings: Vec<f64> = angles.iter().map(|a| 8.0 + 0.2 * a.cos()).collect();
+    let valid = vec![true; angles.len()];
+
+    let reference = PolarScan::new(&angles, &readings, &valid)?;
+    let sensor = PolarScan::new(&angles, &readings, &valid)?;
+
+    let matcher = Matcher::new(Params::default())?;
+    let outcome = matcher.match_polar(reference, sensor)?;
     if outcome.valid {
         println!("sensor-to-reference pose = {:?}", outcome.pose);
     }
@@ -54,209 +44,108 @@ fn match_scans(
 }
 ```
 
-`outcome.valid == true` means the scans matched; `false` means the inputs were
-well-formed but ICP did not produce a usable match. A `?` error means the
-input arrays or scan values violate the input contract. Missing lidar returns
-should have `valid[i] == false`; they keep their position in the scan order,
-and their reading can be `NaN`.
+A self-contained example that simulates a robot in a square room is included:
 
-### Coordinate contract
+```sh
+cargo run -p csm-rs --example scan_matching
+```
+
+## Coordinates and inputs
 
 Inputs use **metres and radians**. Each scan is centered on its own sensor
-origin, and rays are **ordered by bearing**: a polar ray at `theta` with
-reading `r` is the sensor-frame point `[r cos(theta), r sin(theta)]`, and a
-Cartesian ray is its own `[x, y]`. Cartesian bearings are derived as
-`atan2(y, x)` unless supplied with `CartesianScan::with_angles` (for example a
-differently mounted scanner). The matcher relies on that ordering and never
-sorts or drops points; unordered point-cloud registration is out of scope. The
-result is the rigid transform mapping sensor-scan coordinates into
-reference-scan coordinates: `R(theta) * p + (x, y)` with counter-clockwise
-`theta`. [`Pose`] documents composition.
+origin, and rays are **ordered by bearing**: a polar ray at `theta` with reading
+`r` is the sensor-frame point `[r cos(theta), r sin(theta)]`. Cartesian scans are
+supported as well; their bearings are derived as `atan2(y, x)` unless supplied
+with `CartesianScan::with_angles`. The matcher relies on that ordering and never
+sorts or drops points, so unordered point-cloud registration is out of scope.
 
-### Initial pose and reference selection
+The result maps sensor-scan coordinates into reference-scan coordinates:
+`R(theta) * p + (x, y)`, with `theta` counter-clockwise.
 
-`match_polar` and `match_cartesian` use the identity initial pose. Pass an
-explicit guess (for example from odometry) with `match_polar_from` or
-`match_cartesian_from`:
+A missing lidar return is marked with `valid[i] == false` and keeps its position
+in the scan order. Malformed input returns a `ScanError`. A well-formed pair that
+cannot be matched is a normal outcome with `valid == false`; inspect
+`MatchOutcome::termination` for the reason.
+
+## Initial pose and reference
+
+`match_polar`/`match_cartesian` start from the identity pose. Pass an explicit
+guess, for example from odometry, with `match_polar_from`/`match_cartesian_from`:
 
 ```rust
-use csm_rs::{Matcher, Params, PolarScan, Pose};
+use csm_rs::{Matcher, Params, Pose};
 
 let matcher = Matcher::new(Params::default())?;
 let guess = Pose::new(0.10, -0.05, 0.02);
 let outcome = matcher.match_polar_from(reference, sensor, guess)?;
 ```
 
-The reference scan is always chosen explicitly by the caller; the library
-never replaces it implicitly.
+The reference scan is always chosen by the caller.
 
-### Uncertainty
+## Uncertainty and reusable storage
 
-Matching defaults to pose-only. Request the closed-form covariance and
-derivative matrices explicitly:
+Matching is pose-only by default. Enable the closed-form covariance, derivative
+matrices, and Fisher information with `Params::do_compute_covariance`; the result
+reports uncertainty status independently of whether the pose is usable.
+
+For fixed-rate applications, build a `PreparedMatcher` once and update its frames
+in place:
 
 ```rust
-use csm_rs::{Matcher, Params};
-
-let params = Params { do_compute_covariance: true, ..Params::default() };
-let matcher = Matcher::new(params)?;
-```
-
-`MatchOutcome::covariance_status` reports disabled, computed, or failed
-uncertainty independently of whether the pose itself is usable. Successful
-uncertainty outputs are the closed-form `covariance`, the `dx_dy_reference`
-and `dx_dy_sensor` derivative matrices, and the `fisher_information` Hessian of
-the point-to-line objective. Uncertainty failure never invalidates an
-otherwise usable pose.
-
-For reusable storage, reserve the outcome's derivative matrices once with
-`MatchOutcome::reserve_uncertainty` and match into it with
-`PreparedMatcher::match_into`; covariance and derivative matching then perform
-no heap allocation after preparation. Preparation costs and failure semantics
-are documented on [`MatchOutcome`] and [`PreparedMatcher`].
-
-### Reusable storage
-
-For fixed-rate applications, build a `PreparedMatcher` once and update its
-frames in place:
-
-```rust,ignore
 let matcher = Matcher::default_pose_only();
 let mut workspace = matcher.prepare(reference, sensor)?;
 workspace.update_sensor(&next_readings, &next_valid)?;
-let estimate = workspace.match_once()?;
+let outcome = workspace.match_once()?;
 ```
 
-`Matcher::prepare_polar`, `Matcher::prepare_cartesian`, and `Matcher::prepare`
-make scan ownership and workspace reuse explicit. Preparation allocates the
-reference and sensor storage, the ICP scratch buffers, and the optional
-orientation/visibility buffers. After that, repeated pose-only matching —
-including input updates, restarts, retained search/outlier/weighting options,
-and unsuccessful outcomes — performs **zero heap allocations**.
+Preparation allocates all scan and scratch storage; repeated pose-only matching
+afterwards performs no heap allocation. Capacity is explicit: inputs larger than
+the reserved capacity return `ScanError::CapacityExceeded` instead of growing
+mid-match. Grow it with `PreparedMatcher::reserve`.
 
-`PreparedMatcher::capacities` reports reserved rays, and `workspace_bytes`
-reports the scratch footprint. Grow capacity explicitly with
-`PreparedMatcher::reserve`; an input larger than the reserved capacity returns
-`ScanError::CapacityExceeded` rather than growing during a match. Reference and
-sensor scans may have different sizes, and sizes above 3,000 points are
-supported by sizing the workspace accordingly.
+## Performance
 
-### Diagnostics
+Measured on a Jetson AGX Xavier (8× ARMv8, `--release`), synthetic ordered polar
+scans. Latency excludes preparation; measure on your own hardware before
+relying on these figures.
 
-`MatchOutcome::termination` reports the algorithm's actual stop reason:
-convergence, iteration exhaustion, too few correspondences, insufficient usable
-geometry, cycle detection, numerical failure, or another failure.
-`MatchOutcome::accepted()` distinguishes an accepted convergence from a
-candidate produced by an unsuccessful termination, and
-`MatchOutcome::candidate()` exposes the candidate pose (or `None` when no
-candidate exists). Iteration counts, correspondence counts, and residual error
-are preserved after unsuccessful termination.
+| scan | mode | mean | p99 |
+| ---: | --- | ---: | ---: |
+| 2,048 rays | pose only | 5.4 ms | 7.3 ms |
+| 3,000 rays | pose only | 10.2 ms | 13.6 ms |
+| 3,000 rays | with covariance | 11.7 ms | 14.4 ms |
+| 10,000 rays | pose only | 124 ms | 129 ms |
 
-A well-formed scan pair with insufficient usable geometry is an outcome, not a
-malformed-input error. `PreparedMatcher::match_once_traced` reports real ICP
-iteration snapshots (pose, error, valid correspondences, restart context, and
-the contributing correspondences in reference-frame coordinates) for
-inspection; instrumented timing is separate from ordinary matching and tracing
-does not change the result.
+Typical 2,000–3,000-point scans support 20–30 Hz cycles. Larger scans scale
+super-linearly. These are ordinary Linux figures, not a hard real-time
+guarantee.
 
-### Examples
+## Interactive demo
 
-A beginner-friendly example creates laser data, prints every beam, and shows
-the estimated movement:
+A local browser demo runs the real matcher and shows the reference, unaligned,
+and aligned scans:
 
 ```sh
-cargo run -p csm-rs --example scan_matching
+cargo run -p csm-rs-demo --release
 ```
 
-The example simulates a robot scanning a square room. It needs no input files,
-extra dependencies, or C installation. Change `FIRST_SENSOR_POSE` in
-`examples/scan_matching.rs` to try another small movement.
+Then open <http://127.0.0.1:7878>. See [demo/README.md](demo/README.md).
 
-For a repeatable resource report (optimized example sizes plus the prepared
-latency benchmark), run `scripts/measure-release.sh`.
-
-## Performance and measurements
-
-Resource measurements are reproducible and separated from correctness tests:
+## Testing
 
 ```sh
-./scripts/measure-release.sh          # environment, build sizes, latency/allocation/memory/alignment
-cargo run --release -p csm-rs --example measure
+cargo test
 ```
 
-The report measures preparation and matching separately, reports latency
-percentiles (including p99), counts steady-state heap allocations, reports
-memory and alignment quality, and records the seed, hardware, toolchain, build
-settings, revision, and commands. See [docs/measurements.md](docs/measurements.md)
-for the method, the latest recorded run, the validated Jetson AGX Xavier
-hardware, the workloads it supports, the unverified targets, and the assessment
-against the provisional p99 target. No claim of outperforming the C
-implementation is made without comparable measurements.
+## Changelog
 
-## Capability coverage
-
-The retained CSM capabilities are covered by two reproducible suites:
-
-- `src/golden_tests.rs` (run by `cargo test --lib`) checks exact agreement with
-  the C reference corpus: poses to 1e-9, iteration/correspondence counts,
-  correspondence hashes, covariance and derivative matrices to 1e-6 relative
-  error, and the known smart/naive divergence on the `stallo2` log.
-- `tests/capabilities.rs` (run by `cargo test --test capabilities`) exercises
-  the public API for correspondence strategies, point/line metrics, outlier
-  rejection, orientation and visibility filtering, ML/sigma weighting, restart,
-  covariance/derivatives/Fisher information, degenerate geometry, and partial
-  overlap.
-
-Run everything with:
-
-```sh
-cargo test --all-targets --all-features
-```
-
-### Intentional numerical deviations
-
-The remaster preserves mathematical intent and feature coverage rather than
-requiring exact C agreement everywhere. Known deviations are:
-
-- **Smart vs naive on `stallo2`.** CSM's jump-table and naive searches diverge
-  on that log's invalid sectors; both configured C paths are retained and
-  tested individually instead of hiding the divergence.
-- **Deliberate solver changes.** Where a change improves clarity, correctness,
-  or resource use, it is validated against the golden corpus, known transforms,
-  and degenerate geometry rather than against the C source alone. No claim of
-  outperforming C is made without comparable measurements.
-
-Regenerate the corpus with the C reference source checked out at `../csm`:
-
-```sh
-./fixture-generator/build.sh /path/to/csm tests/fixtures/identity.json
-```
-
-## Workspace layout
-
-- `src/` — the core library (no runtime dependencies)
-- `tests/` — integration tests and C reference fixtures
-- `examples/` — runnable examples and measurement programs
-- `demo/` — local browser demonstration (axum + Tokio, dependencies isolated)
-- `fixture-generator/` — C tool producing the reference fixtures
-- `docs/contributing.md` — contributor commands and numerical baseline
-- `docs/measurements.md` — resource measurements and hardware validation
-
-Launch the demo with `cargo run -p csm-rs-demo --release`; see `demo/README.md`.
+See [CHANGELOG.md](CHANGELOG.md).
 
 ## License
 
-The scan, correspondence, ICP, and covariance modules are derivative work of
-Andrea Censi's Canonical Scan Matcher (CSM), released under LGPLv3. The
-closed-form solver in `solver.rs` is derivative work of Andrea Censi's
-vendored `gpc` solver, released under GPLv2-or-later. The checked-in fixture
-generator is a separate throwaway C tool and is not part of the Rust crate.
-
-The current Rust crate is distributed under **GPL-2.0-or-later** because it
-contains a direct port of the upstream gpc solver, whose source is
-GPL-2.0-or-later. The remaining CSM-derived algorithm is LGPL-3.0, and its
-license text is included for attribution. See NOTICE.md for component-level
-provenance. The crate cannot claim an LGPL-only option while the GPL-derived
-solver remains part of the combined work. A future clean-room solver may enable
-a different license declaration; that would require a separate provenance
-review.
+The scan, correspondence, ICP, and covariance modules derive from Andrea Censi's
+Canonical Scan Matcher (LGPLv3), and the closed-form solver derives from its
+vendored GPLv2-or-later solver. Because the GPL-derived solver is part of the
+combined crate, csm-rs is distributed under **GPL-2.0-or-later**. See
+[NOTICE.md](NOTICE.md) for component-level provenance and the included license
+texts.

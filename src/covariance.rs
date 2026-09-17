@@ -1,38 +1,32 @@
 //! Closed-form estimate of ICP's matching covariance.
 //!
-//! C: `sm/csm/icp/icp_covariance.c` (`compute_covariance_exact`),
-//!     `sm/csm/laser_data_fisher.c` (`ld_fisher0`)
-//!
 //! Method: Censi, "An accurate closed-form estimate of ICP's covariance"
-//! (ICRA 2007). The exact calculation returns the unscaled covariance and
-//! the two input-derivative matrices. CSM scales only the covariance by
+//! (ICRA 2007). The exact calculation returns the unscaled covariance and the
+//! two input-derivative matrices. Only the covariance is scaled by
 //! `params.sigma²` before storing the public result.
 
-use crate::laser_data::LaserData;
 use crate::math::{Mat3, Matrix};
+use crate::scan_data::ScanData;
 
-/// The unscaled outputs of CSM's exact covariance calculation.
-///
-/// C: the `cov0_x` output of `compute_covariance_exact()`, plus the Hessian
-/// of the point-to-line objective, which is the match's Fisher information.
+/// The unscaled covariance and the Hessian of the point-to-line objective,
+/// which is the match's Fisher information.
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct ExactCovariance {
     pub cov0_x: Mat3,
     pub fisher: Mat3,
 }
 
-/// Compute CSM's exact closed-form covariance before the final `sigma²`
+/// Compute the exact closed-form covariance before the final `sigma²`
 /// scaling.
 ///
 /// The calculation uses the correspondence set currently stored on
-/// `laser_sens`. This is deliberate: after a restart the C implementation
+/// `laser_sens`. This is deliberate: after a restart the implementation
 /// recomputes that set at the selected pose and then passes it directly to
 /// `compute_covariance_exact()`.
 ///
-/// C: `sm/csm/icp/icp_covariance.c:compute_covariance_exact()`
 pub(crate) fn compute_covariance_exact_into(
-    laser_ref: &LaserData,
-    laser_sens: &LaserData,
+    laser_ref: &ScanData,
+    laser_sens: &ScanData,
     x: [f64; 3],
     d2j_dxdy1: &mut Matrix,
     d2j_dxdy2: &mut Matrix,
@@ -40,7 +34,7 @@ pub(crate) fn compute_covariance_exact_into(
     d2j_dxdy1.reset(3, laser_ref.nrays);
     d2j_dxdy2.reset(3, laser_sens.nrays);
 
-    // The Hessian d²J/dx², accumulated as the three pieces used by C.
+    // The Hessian d²J/dx², accumulated in three blocks.
     let mut d2j_dt2 = [[0.0; 2]; 2];
     let mut d2j_dt_dtheta = [0.0; 2];
     let mut d2j_dtheta2 = 0.0;
@@ -63,17 +57,13 @@ pub(crate) fn compute_covariance_exact_into(
         let p_j1 = laser_ref.points[j1].p;
         let p_j2 = laser_ref.points[j2].p;
 
-        // C: v1 := rot(theta + M_PI/2) * p_i.
         let v1 = rotate(p_i, theta + std::f64::consts::FRAC_PI_2);
-        // C: v2 := rot(theta) * p_i + t - p_j1.
         let rotated_p_i = rotate(p_i, theta);
         let v2 = [
             rotated_p_i[0] + translation[0] - p_j1[0],
             rotated_p_i[1] + translation[1] - p_j1[1],
         ];
-        // C: v3 := vers(theta + laser_sens->theta[i]).
         let v3 = vers(theta + laser_sens.theta[i]);
-        // C: v4 := vers(theta + laser_sens->theta[i] + M_PI/2).
         let v4 = vers(theta + laser_sens.theta[i] + std::f64::consts::FRAC_PI_2);
 
         let c_k = compute_c_k(p_j1, p_j2);
@@ -87,7 +77,6 @@ pub(crate) fn compute_covariance_exact_into(
         d2j_dt_dtheta[0] += 2.0 * c_v1[0];
         d2j_dt_dtheta[1] += 2.0 * c_v1[1];
 
-        // C: v_new := rot(theta + M_PI) * p_i.
         let v_new = rotate(p_i, theta + std::f64::consts::PI);
         let d2j_dtheta2_k = 2.0 * (quadratic(v2, c_k, v_new) + quadratic(v1, c_k, v1));
         d2j_dtheta2 += d2j_dtheta2_k;
@@ -126,7 +115,6 @@ pub(crate) fn compute_covariance_exact_into(
         );
     }
 
-    // C: compose d²J/dx² from its translation and rotation blocks.
     let d2j_dx2 = Mat3::new([
         [d2j_dt2[0][0], d2j_dt2[0][1], d2j_dt_dtheta[0]],
         [d2j_dt2[1][0], d2j_dt2[1][1], d2j_dt_dtheta[1]],
@@ -173,7 +161,6 @@ fn compute_c_k(p1: [f64; 2], p2: [f64; 2]) -> [[f64; 2]; 2] {
     [[c * c, c * s], [c * s, s * s]]
 }
 
-/// C: `dC_drho()` in `sm/csm/icp/icp_covariance.c`.
 fn d_c_drho(p1: [f64; 2], p2: [f64; 2]) -> [[f64; 2]; 2] {
     let eps = 0.001;
     let c_k = compute_c_k(p1, p2);
@@ -227,9 +214,8 @@ fn negative_left_multiply_in_place(left: &Mat3, matrix: &mut Matrix) {
             matrix.data[2][col],
         ];
         for row in 0..3 {
-            matrix.data[row][col] = -(left.data[row][0] * v[0]
-                + left.data[row][1] * v[1]
-                + left.data[row][2] * v[2]);
+            matrix.data[row][col] =
+                -(left.data[row][0] * v[0] + left.data[row][1] * v[1] + left.data[row][2] * v[2]);
         }
     }
 }
@@ -237,10 +223,10 @@ fn negative_left_multiply_in_place(left: &Mat3, matrix: &mut Matrix) {
 #[cfg(test)]
 mod failure_tests {
     use super::*;
-    use crate::laser_data::{Correspondence, CorrespondenceType, Point2d};
+    use crate::scan_data::{Correspondence, CorrespondenceType, Point};
 
-    fn point(x: f64, y: f64) -> Point2d {
-        Point2d {
+    fn point(x: f64, y: f64) -> Point {
+        Point {
             p: [x, y],
             rho: f64::NAN,
             phi: f64::NAN,
@@ -253,7 +239,7 @@ mod failure_tests {
         // normal is horizontal and the translation information along x is
         // empty; the Hessian is singular.
         let n = 3;
-        let mut scan = LaserData::new(n, -1.0, 1.0);
+        let mut scan = ScanData::new(n, -1.0, 1.0);
         for i in 0..n {
             let y = i as f64 - 1.0;
             scan.valid[i] = true;
@@ -270,7 +256,11 @@ mod failure_tests {
         }
         let mut dx_dy1 = Matrix::zeros(0, 0);
         let mut dx_dy2 = Matrix::zeros(0, 0);
-        let result = compute_covariance_exact_into(&scan, &scan, [0.0; 3], &mut dx_dy1, &mut dx_dy2);
-        assert!(result.is_none(), "singular geometry must not yield a covariance");
+        let result =
+            compute_covariance_exact_into(&scan, &scan, [0.0; 3], &mut dx_dy1, &mut dx_dy2);
+        assert!(
+            result.is_none(),
+            "singular geometry must not yield a covariance"
+        );
     }
 }

@@ -1,33 +1,27 @@
 //! Small-matrix and 2D-pose algebra, hand-rolled.
 //!
-//! C: `sm/csm/math_utils.c`, `sm/csm/math_utils_gsl.c`,
-//!     `sm/csm/icp/fast_math.h`
-//!
-//! Scope: 2×2/3×3/4×4 matrix ops actually used by the port — multiply,
-//! transpose, closed-form 2×2/3×3 inverse, 4×4 solve for the gpc normal
-//! equations — plus 2D pose composition/difference and the correspondence
-//! hash. Zero external math dependencies.
+//! Scope: 2×2/3×3/4×4 matrix ops actually used — multiply, transpose,
+//! closed-form 2×2/3×3 inverse, 4×4 solve for the normal equations — plus 2D
+//! pose composition/difference and the correspondence hash. No external math
+//! dependencies.
 
 /// 2×2 matrix, row-major.
 ///
-/// C: raw `gsl_matrix` 2×2 usage in `sm/lib/gpc/gpc.c`
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Mat2 {
-    /// Row-major matrix entries. C: `gsl_matrix` elements in `gpc.c`
+    /// Row-major matrix entries.
     pub data: [[f64; 2]; 2],
 }
 
 impl Mat2 {
     /// Construct a 2×2 matrix from row-major entries.
     ///
-    /// C: 2×2 `gsl_matrix` initialization in `sm/lib/gpc/gpc.c`
     pub fn new(data: [[f64; 2]; 2]) -> Self {
         Self { data }
     }
 
     /// Return the transpose of this matrix.
     ///
-    /// C: `gsl_matrix_transpose_memcpy()` usage in `sm/lib/gpc/gpc.c`
     pub fn transpose(&self) -> Self {
         Self::new(std::array::from_fn(|r| {
             std::array::from_fn(|c| self.data[c][r])
@@ -36,7 +30,6 @@ impl Mat2 {
 
     /// Multiply this matrix by `other`.
     ///
-    /// C: `gsl_blas_dgemm()` usage in `sm/lib/gpc/gpc.c`
     pub fn mul(&self, other: &Mat2) -> Mat2 {
         let (a, b) = (self.data, other.data);
         Mat2::new([
@@ -53,7 +46,6 @@ impl Mat2 {
 
     /// Closed-form inverse; `None` if singular.
     ///
-    /// C: `m_inv()` in `sm/lib/gpc/gpc.c`
     pub fn inv(&self) -> Option<Mat2> {
         let a = self.data;
         let det = a[0][0] * a[1][1] - a[0][1] * a[1][0];
@@ -70,24 +62,21 @@ impl Mat2 {
 
 /// 3×3 matrix, row-major.
 ///
-/// C: egsl 3×3 usage in `sm/csm/icp/icp_covariance.c`
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Mat3 {
-    /// Row-major matrix entries. C: 3×3 `gsl_matrix` elements in CSM
+    /// Row-major matrix entries.
     pub data: [[f64; 3]; 3],
 }
 
 impl Mat3 {
     /// Construct a 3×3 matrix from row-major entries.
     ///
-    /// C: 3×3 matrix initialization in `sm/csm/icp/icp_covariance.c`
     pub fn new(data: [[f64; 3]; 3]) -> Self {
         Self { data }
     }
 
     /// Scale every entry by a scalar.
     ///
-    /// C: `sc()` in `sm/lib/egsl/egsl_ops.c`.
     pub fn scale(&self, scale: f64) -> Self {
         Self::new(std::array::from_fn(|row| {
             std::array::from_fn(|col| self.data[row][col] * scale)
@@ -96,7 +85,6 @@ impl Mat3 {
 
     /// Return the transpose of this matrix.
     ///
-    /// C: matrix transpose operations in `sm/csm/icp/icp_covariance.c`
     pub fn transpose(&self) -> Self {
         Self::new(std::array::from_fn(|r| {
             std::array::from_fn(|c| self.data[c][r])
@@ -105,7 +93,6 @@ impl Mat3 {
 
     /// Multiply this matrix by `other`.
     ///
-    /// C: matrix multiplication operations in `sm/csm/icp/icp_covariance.c`
     pub fn mul(&self, other: &Mat3) -> Mat3 {
         let (a, b) = (self.data, other.data);
         Mat3::new(std::array::from_fn(|r| {
@@ -115,7 +102,6 @@ impl Mat3 {
 
     /// Closed-form inverse via cofactor expansion; `None` if singular.
     ///
-    /// C: 3×3 inverse operations in `sm/csm/icp/icp_covariance.c`
     pub fn inv(&self) -> Option<Mat3> {
         let a = self.data;
         let c00 = a[1][1] * a[2][2] - a[1][2] * a[2][1];
@@ -143,21 +129,18 @@ impl Mat3 {
 
 /// Dynamically sized dense matrix with row-major rows.
 ///
-/// C: `gsl_matrix` in `sm/csm/icp/icp_covariance.c`. The covariance itself
-/// is always 3×3, but its input-derivative matrices are 3×N, where N is the
-/// number of rays in the corresponding scan.
+/// Covariance matrices are always 3×3, but input-derivative matrices are 3×N,
+/// where N is the number of rays in the corresponding scan.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Matrix {
     /// Matrix entries grouped by row.
     ///
-    /// C: `gsl_matrix` elements accessed by `gsl_matrix_get()`.
     pub data: Vec<Vec<f64>>,
 }
 
 impl Matrix {
     /// Construct a zero-filled matrix.
     ///
-    /// C: `zeros(rows, cols)` in `sm/lib/egsl/egsl_ops.c`.
     pub fn zeros(rows: usize, cols: usize) -> Self {
         Self {
             data: vec![vec![0.0; cols]; rows],
@@ -166,14 +149,12 @@ impl Matrix {
 
     /// Number of rows.
     ///
-    /// C: `gsl_matrix::size1`.
     pub fn rows(&self) -> usize {
         self.data.len()
     }
 
     /// Number of columns, or zero for a matrix without rows.
     ///
-    /// C: `gsl_matrix::size2`.
     pub fn cols(&self) -> usize {
         self.data.first().map_or(0, Vec::len)
     }
@@ -200,26 +181,23 @@ impl Matrix {
     }
 }
 
-/// 4×4 matrix, row-major — the gpc normal-equations size.
+/// 4×4 matrix, row-major — the normal-equations size.
 ///
-/// C: raw `gsl_matrix` 4×4 usage in `sm/lib/gpc/gpc.c`
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Mat4 {
-    /// Row-major matrix entries. C: 4×4 `gsl_matrix` elements in `gpc.c`
+    /// Row-major matrix entries.
     pub data: [[f64; 4]; 4],
 }
 
 impl Mat4 {
     /// Construct a 4×4 matrix from row-major entries.
     ///
-    /// C: 4×4 normal-equation matrix initialization in `sm/lib/gpc/gpc.c`
     pub fn new(data: [[f64; 4]; 4]) -> Self {
         Self { data }
     }
 
     /// Return the transpose of this matrix.
     ///
-    /// C: transpose operations in `sm/lib/gpc/gpc.c`
     #[cfg(test)]
     pub fn transpose(&self) -> Self {
         Self::new(std::array::from_fn(|r| {
@@ -229,7 +207,6 @@ impl Mat4 {
 
     /// Multiply this matrix by `other`.
     ///
-    /// C: `gsl_blas_dgemm()` usage in `sm/lib/gpc/gpc.c`
     #[cfg(test)]
     pub fn mul(&self, other: &Mat4) -> Mat4 {
         let (a, b) = (self.data, other.data);
@@ -241,7 +218,6 @@ impl Mat4 {
     /// Solve `A·x = b` via LU decomposition with partial pivoting;
     /// `None` if singular.
     ///
-    /// C: the 4×4 normal-equation solve in `sm/lib/gpc/gpc.c`
     pub fn solve(&self, b: [f64; 4]) -> Option<[f64; 4]> {
         let mut a = self.data;
         let mut x = b;
@@ -276,7 +252,6 @@ impl Mat4 {
 
 /// Pose inverse: ⊖x.
 ///
-/// C: `ominus_d()` in `sm/csm/math_utils.c`
 pub fn ominus(x: [f64; 3]) -> [f64; 3] {
     let c = x[2].cos();
     let s = x[2].sin();
@@ -285,7 +260,6 @@ pub fn ominus(x: [f64; 3]) -> [f64; 3] {
 
 /// Pose composition: x1 ⊕ x2.
 ///
-/// C: `oplus_d()` in `sm/csm/math_utils.c`
 pub fn oplus(x1: [f64; 3], x2: [f64; 3]) -> [f64; 3] {
     let c = x1[2].cos();
     let s = x1[2].sin();
@@ -298,7 +272,6 @@ pub fn oplus(x1: [f64; 3], x2: [f64; 3]) -> [f64; 3] {
 
 /// Pose difference `pose2 ⊖ pose1`, angle wrapped to (−π, π].
 ///
-/// C: `pose_diff_d()` in `sm/csm/math_utils.c`
 pub fn pose_diff(pose2: [f64; 3], pose1: [f64; 3]) -> [f64; 3] {
     let mut res = oplus(ominus(pose1), pose2);
     while res[2] > std::f64::consts::PI {
@@ -312,7 +285,6 @@ pub fn pose_diff(pose2: [f64; 3], pose1: [f64; 3]) -> [f64; 3] {
 
 /// Transform a 2D point by a pose.
 ///
-/// C: `transform_d()` in `sm/csm/math_utils.c`
 pub fn transform(point: [f64; 2], pose: [f64; 3]) -> [f64; 2] {
     let c = pose[2].cos();
     let s = pose[2].sin();
@@ -324,7 +296,6 @@ pub fn transform(point: [f64; 2], pose: [f64; 3]) -> [f64; 2] {
 
 /// Smallest signed difference `a − b`, wrapped to (−π, π].
 ///
-/// C: `angleDiff()` in `sm/csm/math_utils.c`
 pub fn angle_diff(a: f64, b: f64) -> f64 {
     let mut t = a - b;
     while t < -std::f64::consts::PI {
@@ -338,7 +309,6 @@ pub fn angle_diff(a: f64, b: f64) -> f64 {
 
 /// Squared Euclidean distance between two 2D points.
 ///
-/// C: `distance_squared_d()` in `sm/csm/math_utils.c`
 pub(crate) fn distance_squared(a: [f64; 2], b: [f64; 2]) -> f64 {
     let x = a[0] - b[0];
     let y = a[1] - b[1];
@@ -347,14 +317,12 @@ pub(crate) fn distance_squared(a: [f64; 2], b: [f64; 2]) -> f64 {
 
 /// Euclidean norm of a 2D vector.
 ///
-/// C: `norm_d()` in `sm/csm/math_utils.c`
 pub(crate) fn norm(point: [f64; 2]) -> f64 {
     (point[0] * point[0] + point[1] * point[1]).sqrt()
 }
 
 /// Project a point onto the line through two points.
 ///
-/// C: `projection_on_line_d()` in `sm/csm/math_utils.c`
 pub(crate) fn projection_on_line(a: [f64; 2], b: [f64; 2], point: [f64; 2]) -> [f64; 2] {
     projection_on_line_with_distance(a, b, point).0
 }
@@ -376,7 +344,6 @@ fn projection_on_line_with_distance(a: [f64; 2], b: [f64; 2], point: [f64; 2]) -
 
 /// Project a point onto a segment, clamping to the nearer endpoint.
 ///
-/// C: `projection_on_segment_d()` in `sm/csm/math_utils.c`
 pub(crate) fn projection_on_segment(a: [f64; 2], b: [f64; 2], point: [f64; 2]) -> [f64; 2] {
     let projection = projection_on_line(a, b, point);
     let inside = (projection[0] - a[0]) * (projection[0] - b[0])
@@ -393,7 +360,6 @@ pub(crate) fn projection_on_segment(a: [f64; 2], b: [f64; 2], point: [f64; 2]) -
 
 /// Distance from a point to a segment.
 ///
-/// C: `dist_to_segment_d()` in `sm/csm/math_utils.c`
 pub(crate) fn distance_to_segment(a: [f64; 2], b: [f64; 2], point: [f64; 2]) -> f64 {
     let (projection, distance) = projection_on_line_with_distance(a, b, point);
     let inside = (projection[0] - a[0]) * (projection[0] - b[0])
@@ -411,8 +377,7 @@ pub(crate) fn distance_to_segment(a: [f64; 2], b: [f64; 2], point: [f64; 2]) -> 
 /// Hash of a correspondence set, used for oscillation detection.
 /// Each entry is `Some((j1, j2))` for a valid correspondence, `None` otherwise.
 ///
-/// C: `ld_corr_hash()` in `sm/csm/laser_data.c` — reproduces C's unsigned
-/// wraparound arithmetic exactly for golden-master fidelity.
+/// Uses the same unsigned 32-bit wraparound arithmetic throughout.
 pub fn corr_hash(entries: &[Option<(i32, i32)>]) -> u32 {
     corr_hash_iter(entries.iter().copied())
 }
@@ -432,7 +397,6 @@ pub(crate) fn corr_hash_iter(entries: impl IntoIterator<Item = Option<(i32, i32)
     }
     hash & 0x7FFFFFFF
 }
-
 
 /// Allocation-free n×n inverse using caller-owned scratch. `lu`, `out` are
 /// `n*n`, `perm` and `b` are `n`. Returns `false` when the matrix is singular.
@@ -685,7 +649,9 @@ mod tests {
         let mut perm = [0usize; 3];
         let mut b = [0.0; 3];
         let mut inv = [0.0; 9];
-        assert!(invert_flat_into(&a, 3, &mut lu, &mut perm, &mut b, &mut inv));
+        assert!(invert_flat_into(
+            &a, 3, &mut lu, &mut perm, &mut b, &mut inv
+        ));
         let expected = [-24.0, 18.0, 5.0, 20.0, -15.0, -4.0, -5.0, 4.0, 1.0];
         for (actual, want) in inv.iter().zip(expected) {
             assert!((actual - want).abs() < 1e-12, "{actual} != {want}");
@@ -699,12 +665,14 @@ mod tests {
         let mut perm = [0usize; 2];
         let mut b = [0.0; 2];
         let mut inv = [0.0; 4];
-        assert!(!invert_flat_into(&a, 2, &mut lu, &mut perm, &mut b, &mut inv));
+        assert!(!invert_flat_into(
+            &a, 2, &mut lu, &mut perm, &mut b, &mut inv
+        ));
     }
 
     #[test]
     fn corr_hash_matches_c_reference() {
-        // Ground truth generated by compiling CSM's ld_corr_hash verbatim.
+        // Ground truth generated from the reference correspondence hash.
         // case1: [Some((1,2)), None]
         assert_eq!(corr_hash(&[Some((1, 2)), None]), 4100079);
         // case2: [Some((3,4)), Some((5,6)), Some((7,8))]

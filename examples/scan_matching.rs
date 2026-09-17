@@ -1,4 +1,4 @@
-//! A small, readable CSM example for people new to scan matching and Rust.
+//! A small, readable scan-matching example for people new to ICP and Rust.
 //!
 //! Run it from the repository root with:
 //!
@@ -111,7 +111,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         "The second scan is simulated from x = {:.2}, y = {:.2}, angle = {:.2} rad.",
         FIRST_SENSOR_POSE.x, FIRST_SENSOR_POSE.y, FIRST_SENSOR_POSE.theta
     );
-    println!("CSM starts with an identity initial pose and tries to align the scans.");
+    println!("The matcher starts with an identity initial pose and tries to align the scans.");
 
     let matcher = Matcher::new(Params::default())?;
     let result = matcher.match_polar(reference, sensor)?;

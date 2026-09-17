@@ -10,16 +10,16 @@ use axum::{
     Json, Router,
 };
 use csm_rs::{Matcher, Params, PolarScan, Pose, PreparedMatcher, PreparedPolarScan};
-use std::time::Instant;
 use serde::{Deserialize, Serialize};
+use std::time::Instant;
 
-use scene::Scene;
-use import::{export_session, replay_session, run_import, ScanPair};
+use axum::http::StatusCode;
 pub use import::ImportResponse;
+use import::{export_session, replay_session, run_import, ScanPair};
+use scene::Scene;
 use simulation::{
     guess_rng, initial_guess, pose_at, relative_pose, scan_for, ScanFrame, SessionRecord, SimConfig,
 };
-use axum::http::StatusCode;
 
 const INDEX_HTML: &str = include_str!("../web/index.html");
 
@@ -39,13 +39,17 @@ async fn import(Json(pair): Json<ScanPair>) -> Result<Json<ImportResponse>, (Sta
         .map_err(|error| (StatusCode::BAD_REQUEST, error))
 }
 
-async fn replay(Json(record): Json<SessionRecord>) -> Result<Json<ImportResponse>, (StatusCode, String)> {
+async fn replay(
+    Json(record): Json<SessionRecord>,
+) -> Result<Json<ImportResponse>, (StatusCode, String)> {
     replay_session(&record)
         .map(Json)
         .map_err(|error| (StatusCode::BAD_REQUEST, error))
 }
 
-async fn export(Json(config): Json<SimConfig>) -> Result<Json<SessionRecord>, (StatusCode, String)> {
+async fn export(
+    Json(config): Json<SimConfig>,
+) -> Result<Json<SessionRecord>, (StatusCode, String)> {
     export_session(&config)
         .map(Json)
         .map_err(|error| (StatusCode::INTERNAL_SERVER_ERROR, error))
@@ -139,8 +143,8 @@ fn run_trace(
     )
     .map_err(|error| error.to_string())?;
     let matcher = Matcher::new(params_from(config)).map_err(|error| error.to_string())?;
-    let mut workspace = PreparedMatcher::new(matcher, reference, sensor)
-        .map_err(|error| error.to_string())?;
+    let mut workspace =
+        PreparedMatcher::new(matcher, reference, sensor).map_err(|error| error.to_string())?;
     let _prepare_ms = prepare_start.elapsed().as_secs_f64() * 1e3;
 
     let normal_start = Instant::now();

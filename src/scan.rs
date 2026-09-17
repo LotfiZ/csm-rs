@@ -4,9 +4,9 @@
 //! discard rays. Explicitly invalid rays keep their position in the ordering,
 //! which preserves the neighbourhood relationships used by the matcher.
 
-use crate::laser_data::LaserData;
+use crate::scan_data::ScanData;
 
-pub use crate::laser_data::ScanError;
+pub use crate::scan_data::ScanError;
 
 /// A validated ordered polar scan borrowed from caller-owned buffers.
 ///
@@ -51,7 +51,7 @@ impl<'a> PolarScan<'a> {
         }
         // Reuse the established validation rules while retaining borrowed
         // ownership. The input order is preserved.
-        LaserData::from_polar(angles.to_vec(), readings.to_vec(), valid.to_vec())?;
+        ScanData::from_polar(angles.to_vec(), readings.to_vec(), valid.to_vec())?;
         Ok(Self {
             angles,
             readings,

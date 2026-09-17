@@ -122,7 +122,11 @@ pub fn pose_at(scenario: &str, step: u64, motion: f64) -> Pose {
         "partial_overlap" => Pose::new(-3.0 + 0.15 * s, 0.0, 0.01 * s),
         _ => {
             let angle = 0.12 * s;
-            Pose::new(2.5 * angle.cos(), 2.5 * angle.sin(), angle + std::f64::consts::FRAC_PI_2)
+            Pose::new(
+                2.5 * angle.cos(),
+                2.5 * angle.sin(),
+                angle + std::f64::consts::FRAC_PI_2,
+            )
         }
     }
 }

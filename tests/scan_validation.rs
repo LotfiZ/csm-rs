@@ -4,7 +4,9 @@
 use csm_rs::{Matcher, Params, PolarScan, ScanError};
 
 fn angles(n: usize) -> Vec<f64> {
-    (0..n).map(|i| -1.0 + 2.0 * i as f64 / (n - 1) as f64).collect()
+    (0..n)
+        .map(|i| -1.0 + 2.0 * i as f64 / (n - 1) as f64)
+        .collect()
 }
 
 #[test]

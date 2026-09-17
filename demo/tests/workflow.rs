@@ -67,7 +67,10 @@ async fn controls_change_real_inputs() {
 
     let mut guessed = base(4);
     guessed["initial_error"] = json!(1.2);
-    assert_ne!(post_frame(guessed).await.initial_pose, baseline.initial_pose);
+    assert_ne!(
+        post_frame(guessed).await.initial_pose,
+        baseline.initial_pose
+    );
 
     let mut dropped = base(4);
     dropped["dropout"] = json!(0.6);
@@ -165,7 +168,10 @@ async fn advanced_configuration_changes_the_result() {
     let mut strict = base(4);
     strict["max_correspondence_dist"] = json!(0.0001);
     let strict = post_frame(strict).await;
-    assert!(!strict.valid, "an impossible correspondence distance must fail");
+    assert!(
+        !strict.valid,
+        "an impossible correspondence distance must fail"
+    );
     assert!(!strict.accepted);
     assert_eq!(strict.termination, "NoCorrespondences");
 }
@@ -310,9 +316,8 @@ async fn export_replay_round_trips() {
     let replay: serde_json::Value = serde_json::from_str(&replay_body).unwrap();
     let stored = &record["result"]["estimated_pose"];
     for i in 0..3 {
-        let delta = (replay["estimated_pose"][i].as_f64().unwrap()
-            - stored[i].as_f64().unwrap())
-        .abs();
+        let delta =
+            (replay["estimated_pose"][i].as_f64().unwrap() - stored[i].as_f64().unwrap()).abs();
         assert!(delta < 1e-9, "replay diverged at {i}: {delta}");
     }
 
