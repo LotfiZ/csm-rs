@@ -20,6 +20,8 @@ pub struct PolarScan<'a> {
     angles: &'a [f64],
     readings: &'a [f64],
     valid: &'a [bool],
+    sigma: Option<&'a [f64]>,
+    true_alpha: Option<&'a [f64]>,
 }
 
 impl<'a> PolarScan<'a> {
@@ -54,7 +56,49 @@ impl<'a> PolarScan<'a> {
             angles,
             readings,
             valid,
+            sigma: None,
+            true_alpha: None,
         })
+    }
+
+    /// Validate and borrow polar scan data with optional per-ray uncertainty
+    /// inputs used by the sigma/ML weighting paths.
+    ///
+    /// `sigma` is the per-ray range standard deviation in metres (finite and
+    /// non-negative, or `NaN` when unknown); `true_alpha` is a known surface
+    /// orientation in radians used by ML weighting (`NaN` when unknown).
+    pub fn with_inputs(
+        angles: &'a [f64],
+        readings: &'a [f64],
+        valid: &'a [bool],
+        sigma: Option<&'a [f64]>,
+        true_alpha: Option<&'a [f64]>,
+    ) -> Result<Self, ScanError> {
+        let mut scan = Self::new(angles, readings, valid)?;
+        if let Some(sigma) = sigma {
+            if sigma.len() != angles.len() {
+                return Err(ScanError::InconsistentLengths {
+                    field: "sigma",
+                    expected: angles.len(),
+                    actual: sigma.len(),
+                });
+            }
+            if sigma.iter().any(|value| *value < 0.0) {
+                return Err(ScanError::NegativeSigma(0));
+            }
+        }
+        if let Some(true_alpha) = true_alpha {
+            if true_alpha.len() != angles.len() {
+                return Err(ScanError::InconsistentLengths {
+                    field: "true_alpha",
+                    expected: angles.len(),
+                    actual: true_alpha.len(),
+                });
+            }
+        }
+        scan.sigma = sigma;
+        scan.true_alpha = true_alpha;
+        Ok(scan)
     }
 
     /// Bearings in radians, one per ray, in scan order.
@@ -70,6 +114,16 @@ impl<'a> PolarScan<'a> {
     /// Explicit per-ray validity, one entry per ray, in scan order.
     pub fn valid(&self) -> &'a [bool] {
         self.valid
+    }
+
+    /// Optional per-ray range standard deviation in metres.
+    pub fn sigma(&self) -> Option<&'a [f64]> {
+        self.sigma
+    }
+
+    /// Optional per-ray known surface orientation in radians.
+    pub fn true_alpha(&self) -> Option<&'a [f64]> {
+        self.true_alpha
     }
 
     pub fn len(&self) -> usize {

@@ -25,6 +25,10 @@
   reusable prepared storage and zero allocation after preparation, reporting
   uncertainty failure independently of pose status
   ([#41](https://github.com/LotfiZ/csm-rs/issues/41)).
+- Validate the retained numerical capabilities through the public API, with a
+  reproducible capability suite, per-ray sigma/known-orientation inputs for the
+  weighting paths, and a documented deviations summary
+  ([#42](https://github.com/LotfiZ/csm-rs/issues/42)).
 - Documented the coordinate contract: metres, radians, scan ordering, sensor
   origin, and the sensor-to-reference transform composition.
 - Retained `PreparedPolarScan`/`PreparedMatcher` reusable storage and optional

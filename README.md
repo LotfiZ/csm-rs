@@ -194,6 +194,39 @@ cargo run --release -p csm-rs --example benchmark_prepared
 For a repeatable release resource report (optimized example sizes plus the
 prepared latency benchmark), run `scripts/measure-release.sh`.
 
+## Capability coverage
+
+The retained CSM capabilities are covered by two reproducible suites:
+
+- `src/golden_tests.rs` (run by `cargo test --lib`) checks exact agreement with
+  the C reference corpus: poses to 1e-9, iteration/correspondence counts,
+  correspondence hashes, covariance and derivative matrices to 1e-6 relative
+  error, and the known smart/naive divergence on the `stallo2` log.
+- `tests/capabilities.rs` (run by `cargo test --test capabilities`) exercises
+  the public API for correspondence strategies, point/line metrics, outlier
+  rejection, orientation and visibility filtering, ML/sigma weighting, restart,
+  covariance/derivatives/Fisher information, degenerate geometry, and partial
+  overlap.
+
+Run everything with:
+
+```sh
+cargo test --all-targets --all-features
+```
+
+### Intentional numerical deviations
+
+The remaster preserves mathematical intent and feature coverage rather than
+requiring exact C agreement everywhere. Known deviations are:
+
+- **Smart vs naive on `stallo2`.** CSM's jump-table and naive searches diverge
+  on that log's invalid sectors; both configured C paths are retained and
+  tested individually instead of hiding the divergence.
+- **Deliberate solver changes.** Where a change improves clarity, correctness,
+  or resource use, it is validated against the golden corpus, known transforms,
+  and degenerate geometry rather than against the C source alone. No claim of
+  outperforming C is made without comparable measurements.
+
 Regenerate the corpus with the C reference source checked out at
 `/path/to/csm-source`:
 
