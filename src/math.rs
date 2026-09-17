@@ -177,6 +177,27 @@ impl Matrix {
     pub fn cols(&self) -> usize {
         self.data.first().map_or(0, Vec::len)
     }
+
+    /// Resize to `rows × cols`, reusing existing row allocations where
+    /// possible, and zero-fill. Used to reuse uncertainty output storage.
+    pub(crate) fn reset(&mut self, rows: usize, cols: usize) {
+        self.data.truncate(rows);
+        while self.data.len() < rows {
+            self.data.push(Vec::new());
+        }
+        for row in &mut self.data {
+            row.clear();
+            row.resize(cols, 0.0);
+        }
+    }
+
+    /// Copy `source` into this matrix, reusing existing row allocations.
+    pub(crate) fn copy_from(&mut self, source: &Matrix) {
+        self.reset(source.rows(), source.cols());
+        for (dst, src) in self.data.iter_mut().zip(&source.data) {
+            dst.copy_from_slice(src);
+        }
+    }
 }
 
 /// 4×4 matrix, row-major — the gpc normal-equations size.

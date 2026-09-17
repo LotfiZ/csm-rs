@@ -4,7 +4,7 @@
 //! so no other test can allocate concurrently and perturb the counter.
 
 use csm_rs::{
-    CorrespondenceSearch, Matcher, Params, PreparedPolarScan,
+    CorrespondenceSearch, CovarianceStatus, MatchOutcome, Matcher, Params, PreparedPolarScan,
 };
 use std::alloc::{GlobalAlloc, Layout, System};
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -101,4 +101,32 @@ fn repeated_prepared_pose_matching_does_not_allocate() {
     assert_zero_allocations("restart", restart, base.clone());
 
     assert_zero_allocations("unsuccessful", Params::default(), far);
+
+    // Covariance/Fisher uncertainty with caller-reused output buffers.
+    let valid = vec![true; 720];
+    let params = Params {
+        do_compute_covariance: true,
+        ..Params::default()
+    };
+    let mut workspace = Matcher::new(params)
+        .unwrap()
+        .prepare(scan(720, 0.0), scan(720, 0.0))
+        .unwrap();
+    let mut outcome = MatchOutcome::default();
+    outcome.reserve_uncertainty(720, 720);
+    for _ in 0..3 {
+        workspace.match_into(&mut outcome).unwrap();
+    }
+    assert_eq!(outcome.covariance_status, CovarianceStatus::Computed);
+    assert!(outcome.has_uncertainty());
+    let before = allocations();
+    for _ in 0..20 {
+        workspace.update_sensor(&base, &valid).unwrap();
+        workspace.match_into(&mut outcome).unwrap();
+    }
+    assert_eq!(
+        allocations() - before,
+        0,
+        "covariance matching allocated during matching"
+    );
 }

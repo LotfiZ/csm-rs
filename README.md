@@ -117,7 +117,17 @@ let matcher = Matcher::new(params)?;
 ```
 
 `MatchOutcome::covariance_status` reports disabled, computed, or failed
-uncertainty independently of whether the pose itself is usable.
+uncertainty independently of whether the pose itself is usable. Successful
+uncertainty outputs are the closed-form `covariance`, the `dx_dy_reference`
+and `dx_dy_sensor` derivative matrices, and the `fisher_information` Hessian of
+the point-to-line objective. Uncertainty failure never invalidates an
+otherwise usable pose.
+
+For reusable storage, reserve the outcome's derivative matrices once with
+`MatchOutcome::reserve_uncertainty` and match into it with
+`PreparedMatcher::match_into`; covariance and derivative matching then perform
+no heap allocation after preparation. Preparation costs and failure semantics
+are documented on [`MatchOutcome`] and [`PreparedMatcher`].
 
 ### Reusable storage
 

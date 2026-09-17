@@ -21,6 +21,10 @@
   capacity, explicit growth, clear capacity errors, and zero heap allocation
   during repeated matching for the retained options
   ([#40](https://github.com/LotfiZ/csm-rs/issues/40)).
+- Provide optional covariance, derivative, and Fisher-information outputs with
+  reusable prepared storage and zero allocation after preparation, reporting
+  uncertainty failure independently of pose status
+  ([#41](https://github.com/LotfiZ/csm-rs/issues/41)).
 - Documented the coordinate contract: metres, radians, scan ordering, sensor
   origin, and the sensor-to-reference transform composition.
 - Retained `PreparedPolarScan`/`PreparedMatcher` reusable storage and optional

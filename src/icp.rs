@@ -13,10 +13,10 @@
 use crate::correspondence::{
     find_correspondences, kill_outliers_double_with_scratch, kill_outliers_trim_with_scratch,
 };
-use crate::covariance::compute_covariance_exact;
+use crate::covariance::compute_covariance_exact_into;
 use crate::laser_data::{LaserData, OrientationScratch, ScanError};
 use crate::matching::TerminationReason;
-use crate::math::{corr_hash_iter, ominus, pose_diff};
+use crate::math::{corr_hash_iter, ominus, pose_diff, Mat3, Matrix};
 use crate::params::DistanceMetric;
 use crate::params::Params;
 use crate::result::SmResult;
@@ -38,7 +38,16 @@ pub(crate) fn sm_icp(
         params.stopping.max_iterations.max(0) as usize,
         params.correspondence.orientation_neighbourhood,
     );
-    sm_icp_with_scratch(params, guess, laser_ref, laser_sens, result, &mut scratch)
+    let termination =
+        sm_icp_with_scratch(params, guess, laser_ref, laser_sens, result, &mut scratch)?;
+    // The convenience path owns its result, so copy the reusable derivative
+    // buffers out before the scratch is dropped.
+    if scratch.covariance.is_some() {
+        result.dx_dy1 = Some(scratch.cov_dx_dy1.clone());
+        result.dx_dy2 = Some(scratch.cov_dx_dy2.clone());
+        result.fisher = scratch.fisher;
+    }
+    Ok(termination)
 }
 
 pub(crate) fn sm_icp_with_scratch(
@@ -107,15 +116,26 @@ pub(crate) fn sm_icp_with_scratch(
     result.nvalid = outcome.nvalid;
 
     if outcome.success && params.do_compute_covariance {
-        if let Some(covariance) = compute_covariance_exact(laser_ref, laser_sens, outcome.x) {
-            result.cov_x = Some(
-                covariance
-                    .cov0_x
-                    .scale(params.correspondence.sigma * params.correspondence.sigma),
-            );
-            result.dx_dy1 = Some(covariance.dx_dy1);
-            result.dx_dy2 = Some(covariance.dx_dy2);
+        if let Some(covariance) = compute_covariance_exact_into(
+            laser_ref,
+            laser_sens,
+            outcome.x,
+            &mut scratch.cov_dx_dy1,
+            &mut scratch.cov_dx_dy2,
+        ) {
+            let scaled = covariance
+                .cov0_x
+                .scale(params.correspondence.sigma * params.correspondence.sigma);
+            result.cov_x = Some(scaled);
+            scratch.covariance = Some(scaled);
+            scratch.fisher = Some(covariance.fisher);
+        } else {
+            scratch.covariance = None;
+            scratch.fisher = None;
         }
+    } else {
+        scratch.covariance = None;
+        scratch.fisher = None;
     }
 
     Ok(outcome.termination)
@@ -140,6 +160,12 @@ pub(crate) struct IcpScratch {
     correspondences: Vec<GpcCorrespondence>,
     visibility_thetas: Vec<f64>,
     orientation: OrientationScratch,
+    /// Reusable derivative-matrix storage for the optional covariance path.
+    pub(crate) cov_dx_dy1: Matrix,
+    pub(crate) cov_dx_dy2: Matrix,
+    /// Covariance and Fisher information produced by the last match.
+    pub(crate) covariance: Option<Mat3>,
+    pub(crate) fisher: Option<Mat3>,
     pub(crate) observer: IterationObserver,
     pub(crate) trace_events: Vec<(usize, [f64; 3], f64, usize)>,
     pub(crate) trace_enabled: bool,
@@ -162,6 +188,10 @@ impl IcpScratch {
             correspondences: Vec::with_capacity(sensor_rays),
             visibility_thetas: vec![f64::NAN; reference_rays.max(sensor_rays)],
             orientation: OrientationScratch::new(orientation_neighbourhood),
+            cov_dx_dy1: Matrix::zeros(3, reference_rays),
+            cov_dx_dy2: Matrix::zeros(3, sensor_rays),
+            covariance: None,
+            fisher: None,
             observer: None,
             trace_events: Vec::new(),
             trace_enabled: false,

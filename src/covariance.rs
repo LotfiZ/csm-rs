@@ -13,13 +13,12 @@ use crate::math::{Mat3, Matrix};
 
 /// The unscaled outputs of CSM's exact covariance calculation.
 ///
-/// C: the `cov0_x`, `dx_dy1`, and `dx_dy2` outputs of
-/// `compute_covariance_exact()`.
-#[derive(Clone, Debug)]
+/// C: the `cov0_x` output of `compute_covariance_exact()`, plus the Hessian
+/// of the point-to-line objective, which is the match's Fisher information.
+#[derive(Clone, Copy, Debug)]
 pub(crate) struct ExactCovariance {
     pub cov0_x: Mat3,
-    pub dx_dy1: Matrix,
-    pub dx_dy2: Matrix,
+    pub fisher: Mat3,
 }
 
 /// Compute the Fisher information matrix for one scan.
@@ -76,13 +75,15 @@ pub fn fisher0(laser: &LaserData) -> Mat3 {
 /// `compute_covariance_exact()`.
 ///
 /// C: `sm/csm/icp/icp_covariance.c:compute_covariance_exact()`
-pub(crate) fn compute_covariance_exact(
+pub(crate) fn compute_covariance_exact_into(
     laser_ref: &LaserData,
     laser_sens: &LaserData,
     x: [f64; 3],
+    d2j_dxdy1: &mut Matrix,
+    d2j_dxdy2: &mut Matrix,
 ) -> Option<ExactCovariance> {
-    let mut d2j_dxdy1 = Matrix::zeros(3, laser_ref.nrays);
-    let mut d2j_dxdy2 = Matrix::zeros(3, laser_sens.nrays);
+    d2j_dxdy1.reset(3, laser_ref.nrays);
+    d2j_dxdy2.reset(3, laser_sens.nrays);
 
     // The Hessian d²J/dx², accumulated as the three pieces used by C.
     let mut d2j_dt2 = [[0.0; 2]; 2];
@@ -140,7 +141,7 @@ pub(crate) fn compute_covariance_exact(
         let d2jk_dtdrho_i = scale_vec2(mat2_vec(c_k, v3), 2.0);
         let d2jk_dtheta_drho_i = 2.0 * (quadratic(v2, c_k, v4) + quadratic(v3, c_k, v1));
         add_column(
-            &mut d2j_dxdy2,
+            d2j_dxdy2,
             i,
             [d2jk_dtdrho_i[0], d2jk_dtdrho_i[1], d2jk_dtheta_drho_i],
         );
@@ -156,7 +157,7 @@ pub(crate) fn compute_covariance_exact(
         );
         let d2jk_dtheta_drho_j1 = -2.0 * quadratic(v_j1, c_k, v1) + quadratic(v2, d_c_drho_j1, v1);
         add_column(
-            &mut d2j_dxdy1,
+            d2j_dxdy1,
             j1,
             [d2jk_dt_drho_j1[0], d2jk_dt_drho_j1[1], d2jk_dtheta_drho_j1],
         );
@@ -164,7 +165,7 @@ pub(crate) fn compute_covariance_exact(
         let d2jk_dt_drho_j2 = scale_vec2(mat2_vec(d_c_drho_j2, v2), 2.0);
         let d2jk_dtheta_drho_j2 = 2.0 * quadratic(v2, d_c_drho_j2, v1);
         add_column(
-            &mut d2j_dxdy1,
+            d2j_dxdy1,
             j2,
             [d2jk_dt_drho_j2[0], d2jk_dt_drho_j2[1], d2jk_dtheta_drho_j2],
         );
@@ -177,17 +178,17 @@ pub(crate) fn compute_covariance_exact(
         [d2j_dt_dtheta[0], d2j_dt_dtheta[1], d2j_dtheta2],
     ]);
     let inverse = d2j_dx2.inv()?;
-    let edx_dy1 = negative_left_multiply(&inverse, &d2j_dxdy1);
-    let edx_dy2 = negative_left_multiply(&inverse, &d2j_dxdy2);
+    negative_left_multiply_in_place(&inverse, d2j_dxdy1);
+    negative_left_multiply_in_place(&inverse, d2j_dxdy2);
 
     let mut cov0_x = [[0.0; 3]; 3];
     for (row, values) in cov0_x.iter_mut().enumerate() {
         for (col, value) in values.iter_mut().enumerate() {
-            let dy1: f64 = (0..edx_dy1.cols())
-                .map(|k| edx_dy1.data[row][k] * edx_dy1.data[col][k])
+            let dy1: f64 = (0..d2j_dxdy1.cols())
+                .map(|k| d2j_dxdy1.data[row][k] * d2j_dxdy1.data[col][k])
                 .sum();
-            let dy2: f64 = (0..edx_dy2.cols())
-                .map(|k| edx_dy2.data[row][k] * edx_dy2.data[col][k])
+            let dy2: f64 = (0..d2j_dxdy2.cols())
+                .map(|k| d2j_dxdy2.data[row][k] * d2j_dxdy2.data[col][k])
                 .sum();
             *value = dy1 + dy2;
         }
@@ -195,8 +196,7 @@ pub(crate) fn compute_covariance_exact(
 
     Some(ExactCovariance {
         cov0_x: Mat3::new(cov0_x),
-        dx_dy1: edx_dy1,
-        dx_dy2: edx_dy2,
+        fisher: d2j_dx2,
     })
 }
 
@@ -264,17 +264,19 @@ fn add_column(matrix: &mut Matrix, column: usize, values: [f64; 3]) {
     }
 }
 
-fn negative_left_multiply(left: &Mat3, right: &Matrix) -> Matrix {
-    let mut result = Matrix::zeros(3, right.cols());
-    for row in 0..3 {
-        for col in 0..right.cols() {
-            let value = left.data[row][0] * right.data[0][col]
-                + left.data[row][1] * right.data[1][col]
-                + left.data[row][2] * right.data[2][col];
-            result.data[row][col] = -value;
+fn negative_left_multiply_in_place(left: &Mat3, matrix: &mut Matrix) {
+    for col in 0..matrix.cols() {
+        let v = [
+            matrix.data[0][col],
+            matrix.data[1][col],
+            matrix.data[2][col],
+        ];
+        for row in 0..3 {
+            matrix.data[row][col] = -(left.data[row][0] * v[0]
+                + left.data[row][1] * v[1]
+                + left.data[row][2] * v[2]);
         }
     }
-    result
 }
 
 #[cfg(test)]
@@ -315,5 +317,46 @@ mod tests {
         let mut laser = LaserData::new(10, -1.0, 1.0);
         laser.readings[0] = 2.0;
         assert_eq!(fisher0(&laser), Mat3::new([[0.0; 3]; 3]));
+    }
+}
+
+#[cfg(test)]
+mod failure_tests {
+    use super::*;
+    use crate::laser_data::{Correspondence, CorrespondenceType, Point2d};
+
+    fn point(x: f64, y: f64) -> Point2d {
+        Point2d {
+            p: [x, y],
+            rho: f64::NAN,
+            phi: f64::NAN,
+        }
+    }
+
+    #[test]
+    fn singular_correspondence_geometry_returns_no_covariance() {
+        // All points lie on the vertical line x = 8, so every point-to-line
+        // normal is horizontal and the translation information along x is
+        // empty; the Hessian is singular.
+        let n = 3;
+        let mut scan = LaserData::new(n, -1.0, 1.0);
+        for i in 0..n {
+            let y = i as f64 - 1.0;
+            scan.valid[i] = true;
+            scan.theta[i] = 0.0;
+            scan.readings[i] = 8.0;
+            scan.points[i] = point(8.0, y);
+            scan.corr[i] = Correspondence {
+                valid: true,
+                j1: i as i32,
+                j2: i as i32,
+                corr_type: CorrespondenceType::PointToLine,
+                dist2_j1: 0.0,
+            };
+        }
+        let mut dx_dy1 = Matrix::zeros(0, 0);
+        let mut dx_dy2 = Matrix::zeros(0, 0);
+        let result = compute_covariance_exact_into(&scan, &scan, [0.0; 3], &mut dx_dy1, &mut dx_dy2);
+        assert!(result.is_none(), "singular geometry must not yield a covariance");
     }
 }
