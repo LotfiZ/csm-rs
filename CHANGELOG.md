@@ -37,6 +37,11 @@
   motion/noise/dropout/initial-guess controls, seeded replay, and request-id
   stale-response guarding verified by browser-to-Rust tests
   ([#44](https://github.com/LotfiZ/csm-rs/issues/44)).
+- Add fixed-reference and previous-frame policies with accumulated-drift
+  reporting, asymmetric-room/ambiguous-corridor/partial-overlap scenarios,
+  progressive advanced configuration, and candidate-versus-accepted result
+  display, verified through the browser workflow
+  ([#45](https://github.com/LotfiZ/csm-rs/issues/45)).
 - Documented the coordinate contract: metres, radians, scan ordering, sensor
   origin, and the sensor-to-reference transform composition.
 - Retained `PreparedPolarScan`/`PreparedMatcher` reusable storage and optional

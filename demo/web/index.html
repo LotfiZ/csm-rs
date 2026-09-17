@@ -57,10 +57,13 @@
       <div class="stat"><span>iterations</span><span id="s-iter">-</span></div>
       <div class="stat"><span>correspondences</span><span id="s-nvalid">-</span></div>
       <div class="stat"><span>error</span><span id="s-error">-</span></div>
-      <div class="stat"><span>true pose</span><span id="s-truth">-</span></div>
-      <div class="stat"><span>estimated pose</span><span id="s-est">-</span></div>
-      <div class="stat"><span>pose error</span><span id="s-perr">-</span></div>
+      <div class="stat"><span>true total pose</span><span id="s-truth">-</span></div>
+      <div class="stat"><span>estimated total pose</span><span id="s-est">-</span></div>
+      <div class="stat"><span>relative true</span><span id="s-reltruth">-</span></div>
+      <div class="stat"><span>relative estimate</span><span id="s-relest">-</span></div>
+      <div class="stat"><span>accumulated drift</span><span id="s-drift">-</span></div>
       <div class="stat"><span>uncertainty</span><span id="s-cov">-</span></div>
+      <p id="drift-note" class="muted"></p>
 
       <label>scenario</label>
       <select id="scenario">
@@ -202,23 +205,25 @@ function render(d) {
   arrow(d.estimated_pose[0], d.estimated_pose[1], d.estimated_pose[2], '#34d399');
 
   $('s-step').textContent = d.step;
-  $('s-status').textContent = d.valid ? 'usable' : 'unsuccessful';
-  $('s-status').className = d.valid ? 'ok' : 'bad';
+  const label = d.accepted ? 'accepted convergence' : (d.valid ? 'candidate (not accepted)' : 'unsuccessful');
+  $('s-status').textContent = label;
+  $('s-status').className = d.accepted ? 'ok' : (d.valid ? 'warn' : 'bad');
   $('s-term').textContent = d.termination;
   $('s-iter').textContent = d.iterations;
   $('s-nvalid').textContent = d.nvalid;
   $('s-error').textContent = d.error.toFixed(5);
   $('s-truth').textContent = fmt(d.truth_pose);
   $('s-est').textContent = fmt(d.estimated_pose);
-  $('s-perr').textContent = poseError(d.truth_pose, d.estimated_pose);
+  $('s-reltruth').textContent = fmt(d.relative_truth_pose);
+  $('s-relest').textContent = fmt(d.relative_estimated_pose);
+  $('s-drift').textContent = fmt(d.drift_pose);
   $('s-cov').textContent = d.covariance_status;
+  $('drift-note').textContent = d.reference_mode === 'previous_frame'
+    ? 'Previous-frame mode composes each relative estimate, so per-frame errors accumulate as drift.'
+    : 'Fixed-reference mode matches every frame against the initial reference, so it does not accumulate drift.';
 }
 
 function fmt(p) { return `(${p[0].toFixed(3)}, ${p[1].toFixed(3)}, ${p[2].toFixed(3)})`; }
-function poseError(a, b) {
-  const dx = a[0] - b[0], dy = a[1] - b[1], dt = a[2] - b[2];
-  return `${Math.hypot(dx, dy).toFixed(3)} m, ${Math.abs(dt).toFixed(3)} rad`;
-}
 
 function setPlaying(value) {
   playing = value;
