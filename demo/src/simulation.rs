@@ -124,6 +124,24 @@ pub fn pose_at(scenario: &str, step: u64, motion: f64) -> Pose {
     }
 }
 
+/// Generate the scan for a specific simulation frame. The per-frame generator
+/// is derived from the seed and frame index so frames are independent and
+/// replay exactly regardless of request order.
+pub fn scan_for(scene: &Scene, pose: Pose, config: &SimConfig, frame: u64) -> ScanFrame {
+    let mut rng = Rng::new(
+        config.seed
+            ^ frame
+                .wrapping_mul(0x9E37_79B9_7F4A_7C15)
+                .wrapping_add(0x1234_5678_9ABC_DEF1),
+    );
+    scan_at(scene, pose, config, &mut rng)
+}
+
+/// A per-frame generator for the initial-guess perturbation.
+pub fn guess_rng(seed: u64, frame: u64) -> Rng {
+    Rng::new(seed ^ frame.wrapping_mul(0x2545_F491_4F6C_DD1D))
+}
+
 /// Generate one scan at the given world pose.
 pub fn scan_at(scene: &Scene, pose: Pose, config: &SimConfig, rng: &mut Rng) -> ScanFrame {
     let mut angles = Vec::with_capacity(RAY_COUNT);

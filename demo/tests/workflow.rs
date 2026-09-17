@@ -113,3 +113,59 @@ async fn response_echoes_request_id_for_stale_guarding() {
     assert_eq!(post_frame(first).await.request_id, 11);
     assert_eq!(post_frame(second).await.request_id, 12);
 }
+
+#[tokio::test]
+async fn scenario_changes_geometry_and_reference() {
+    let mut corridor = base(3);
+    corridor["scenario"] = json!("ambiguous_corridor");
+    let mut partial = base(3);
+    partial["scenario"] = json!("partial_overlap");
+    assert_ne!(
+        post_frame(base(3)).await.reference,
+        post_frame(corridor).await.reference
+    );
+    assert_ne!(
+        post_frame(base(3)).await.reference,
+        post_frame(partial).await.reference
+    );
+}
+
+#[tokio::test]
+async fn reference_policy_switching_replaces_the_reference() {
+    let mut previous = base(6);
+    previous["reference_mode"] = json!("previous_frame");
+    let fixed = post_frame(base(6)).await;
+    let previous = post_frame(previous).await;
+    assert_ne!(fixed.reference, previous.reference);
+    assert_eq!(previous.reference_mode, "previous_frame");
+}
+
+#[tokio::test]
+async fn previous_frame_mode_accumulates_drift() {
+    let mut early = base(3);
+    early["reference_mode"] = json!("previous_frame");
+    early["initial_error"] = json!(0.3);
+    let mut late = base(12);
+    late["reference_mode"] = json!("previous_frame");
+    late["initial_error"] = json!(0.3);
+
+    let early = post_frame(early).await;
+    let late = post_frame(late).await;
+    let drift = |r: &FrameResponse| r.drift_pose[0].hypot(r.drift_pose[1]);
+    assert!(
+        drift(&late) > drift(&early),
+        "accumulated drift should grow with the number of composed frames: {} vs {}",
+        drift(&late),
+        drift(&early)
+    );
+}
+
+#[tokio::test]
+async fn advanced_configuration_changes_the_result() {
+    let mut strict = base(4);
+    strict["max_correspondence_dist"] = json!(0.0001);
+    let strict = post_frame(strict).await;
+    assert!(!strict.valid, "an impossible correspondence distance must fail");
+    assert!(!strict.accepted);
+    assert_eq!(strict.termination, "NoCorrespondences");
+}

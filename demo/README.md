@@ -28,6 +28,21 @@ surface that fits a local, single-process demo without a templating or asset
 pipeline. Its dependencies live only in this package; the `csm-rs` library
 itself has none.
 
+## Reference policies and scenarios
+
+- **Fixed reference** matches every frame against the initial scan, so errors do
+  not accumulate.
+- **Previous frame** replaces the reference each step and composes the relative
+  estimates; per-frame errors accumulate as drift, which the UI reports next to
+  the true pose.
+
+Three scenarios exercise different failure modes: an **asymmetric room**, an
+**ambiguous corridor** whose straight walls weakly constrain yaw, and a
+**partial-overlap** room split by a doorway. Motion, noise, dropout, and
+initial-guess error are independent controls, and advanced matching
+configuration is exposed progressively behind a details panel and passed to
+the real matcher.
+
 ## Design
 
 - The server is **stateless**: every `POST /api/frame` regenerates the seeded
