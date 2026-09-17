@@ -32,8 +32,13 @@ itself has none.
 
 - The server is **stateless**: every `POST /api/frame` regenerates the seeded
   scans for the requested step and runs the matcher. Playback is client-side.
-- Scan generation uses a deterministic xorshift generator so a recorded seed
-  and step replay exactly.
+- Play, pause, single-step, and reset are explicit client states; stepping or
+  resetting pauses playback first.
+- Motion, noise, dropout, and initial-guess error are independent controls that
+  change the actual scan geometry, readings, and initial pose sent to the
+  matcher.
+- Scan generation uses a deterministic xorshift generator so a recorded seed,
+  step, and control set replay exactly.
 - The browser drops stale responses using the request id, so an older frame
   cannot overwrite a newer one.
 - Public hosting and WebAssembly are intentionally out of scope.

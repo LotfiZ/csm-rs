@@ -220,10 +220,24 @@ function poseError(a, b) {
   return `${Math.hypot(dx, dy).toFixed(3)} m, ${Math.abs(dt).toFixed(3)} rad`;
 }
 
-$('play').onclick = () => { playing = true; if (!timer) timer = setInterval(() => { step++; request(); }, 250); };
-$('pause').onclick = () => { playing = false; clearInterval(timer); timer = null; };
-$('step').onclick = () => { step++; request(); };
-$('reset').onclick = () => { step = 0; request(); };
+function setPlaying(value) {
+  playing = value;
+  if (playing && !timer) {
+    timer = setInterval(() => { step++; request(); }, 250);
+  }
+  if (!playing && timer) {
+    clearInterval(timer);
+    timer = null;
+  }
+  $('play').disabled = playing;
+  $('pause').disabled = !playing;
+}
+
+$('play').onclick = () => setPlaying(true);
+$('pause').onclick = () => setPlaying(false);
+$('step').onclick = () => { setPlaying(false); step++; request(); };
+$('reset').onclick = () => { setPlaying(false); step = 0; request(); };
+setPlaying(false);
 for (const id of ['scenario', 'reference_mode', 'seed', 'search', 'metric', 'max_correspondence_dist', 'max_iterations', 'outliers_max_perc', 'restart', 'remove_doubles', 'do_alpha_test', 'do_visibility_test', 'do_compute_covariance']) {
   $(id).addEventListener('change', () => { step = 0; request(); });
 }

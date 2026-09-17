@@ -33,6 +33,10 @@
   moving sensor and runs the real matcher, drawing reference, unaligned, and
   aligned scans with true/estimated motion and termination diagnostics
   ([#43](https://github.com/LotfiZ/csm-rs/issues/43)).
+- Make demo playback reproducible: play/pause/step/reset state, independent
+  motion/noise/dropout/initial-guess controls, seeded replay, and request-id
+  stale-response guarding verified by browser-to-Rust tests
+  ([#44](https://github.com/LotfiZ/csm-rs/issues/44)).
 - Documented the coordinate contract: metres, radians, scan ordering, sensor
   origin, and the sensor-to-reference transform composition.
 - Retained `PreparedPolarScan`/`PreparedMatcher` reusable storage and optional
