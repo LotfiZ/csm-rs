@@ -31,8 +31,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@1.70.0
-      # The demo package uses newer web-framework dependencies; the library
-      # keeps its documented 1.70 MSRV.
       - run: cargo check -p csm-rs --all-targets
 
   docs:
