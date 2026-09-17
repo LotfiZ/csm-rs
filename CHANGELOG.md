@@ -17,6 +17,10 @@
   of inferring from counters, and preserve candidate poses, counts, and
   residuals after unsuccessful termination
   ([#39](https://github.com/LotfiZ/csm-rs/issues/39)).
+- Provide explicitly sized prepared pose workspaces with reference/sensor
+  capacity, explicit growth, clear capacity errors, and zero heap allocation
+  during repeated matching for the retained options
+  ([#40](https://github.com/LotfiZ/csm-rs/issues/40)).
 - Documented the coordinate contract: metres, radians, scan ordering, sensor
   origin, and the sensor-to-reference transform composition.
 - Retained `PreparedPolarScan`/`PreparedMatcher` reusable storage and optional

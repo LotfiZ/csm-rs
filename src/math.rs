@@ -412,56 +412,67 @@ pub(crate) fn corr_hash_iter(entries: impl IntoIterator<Item = Option<(i32, i32)
     hash & 0x7FFFFFFF
 }
 
-/// Invert a square dynamic matrix via LU decomposition with partial
-/// pivoting. Used by `filter_orientation` (C: egsl `inv()` on the n×n
-/// `R·Rᵀ` matrix in `orientation.c`).
-pub(crate) fn invert_dyn(a: &[Vec<f64>]) -> Option<Vec<Vec<f64>>> {
-    let n = a.len();
-    let mut lu = a.to_vec();
-    let mut perm: Vec<usize> = (0..n).collect();
-    // LU in place, tracking row permutations.
+
+/// Allocation-free n×n inverse using caller-owned scratch. `lu`, `out` are
+/// `n*n`, `perm` and `b` are `n`. Returns `false` when the matrix is singular.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn invert_flat_into(
+    a: &[f64],
+    n: usize,
+    lu: &mut [f64],
+    perm: &mut [usize],
+    b: &mut [f64],
+    out: &mut [f64],
+) -> bool {
+    lu[..n * n].copy_from_slice(&a[..n * n]);
+    for (i, p) in perm[..n].iter_mut().enumerate() {
+        *p = i;
+    }
     for col in 0..n {
-        let pivot =
-            (col..n).max_by(|&r, &s| lu[r][col].abs().partial_cmp(&lu[s][col].abs()).unwrap())?;
-        if lu[pivot][col] == 0.0 {
-            return None;
+        let mut pivot = col;
+        let mut best = lu[col * n + col].abs();
+        for r in (col + 1)..n {
+            let value = lu[r * n + col].abs();
+            if value > best {
+                best = value;
+                pivot = r;
+            }
         }
-        lu.swap(col, pivot);
+        if lu[pivot * n + col] == 0.0 {
+            return false;
+        }
+        for c in 0..n {
+            lu.swap(col * n + c, pivot * n + c);
+        }
         perm.swap(col, pivot);
         for r in (col + 1)..n {
-            let f = lu[r][col] / lu[col][col];
-            let pivot_row = lu[col].clone();
-            for (arc, &acc) in lu[r].iter_mut().zip(pivot_row.iter()).skip(col) {
-                *arc -= f * acc;
+            let f = lu[r * n + col] / lu[col * n + col];
+            for c in col..n {
+                lu[r * n + c] -= f * lu[col * n + c];
             }
-            lu[r][col] = f;
+            lu[r * n + col] = f;
         }
     }
-    // Solve A·X = P·I column by column.
-    let mut inv = vec![vec![0.0; n]; n];
     for k in 0..n {
-        // Unit vector of the permuted system: row r holds e_{perm[r]}.
-        let mut b: Vec<f64> = (0..n)
-            .map(|r| if perm[r] == k { 1.0 } else { 0.0 })
-            .collect();
-        // Forward substitution (unit lower).
+        for (r, value) in b[..n].iter_mut().enumerate() {
+            *value = if perm[r] == k { 1.0 } else { 0.0 };
+        }
         for r in 0..n {
             for c in 0..r {
-                b[r] -= lu[r][c] * b[c];
+                b[r] -= lu[r * n + c] * b[c];
             }
         }
-        // Back substitution.
         for r in (0..n).rev() {
             for c in (r + 1)..n {
-                b[r] -= lu[r][c] * b[c];
+                b[r] -= lu[r * n + c] * b[c];
             }
-            b[r] /= lu[r][r];
+            b[r] /= lu[r * n + r];
         }
-        for (r, row) in inv.iter_mut().enumerate() {
-            row[k] = b[r];
+        for r in 0..n {
+            out[r * n + k] = b[r];
         }
     }
-    Some(inv)
+    true
 }
 
 #[cfg(test)]
@@ -645,27 +656,29 @@ mod tests {
     }
 
     #[test]
-    fn invert_dyn_matches_known_3x3() {
-        // Same worked example as mat3_inv_det1_example, through the
-        // dynamic path used by filter_orientation.
-        let a = vec![
-            vec![1.0, 2.0, 3.0],
-            vec![0.0, 1.0, 4.0],
-            vec![5.0, 6.0, 0.0],
-        ];
-        let inv = invert_dyn(&a).expect("invertible");
-        let expected = [[-24.0, 18.0, 5.0], [20.0, -15.0, -4.0], [-5.0, 4.0, 1.0]];
-        for (r, row) in expected.iter().enumerate() {
-            for (c, &want) in row.iter().enumerate() {
-                assert!((inv[r][c] - want).abs() < 1e-12, "({r},{c}): {}", inv[r][c]);
-            }
+    fn invert_flat_matches_known_3x3() {
+        // Same worked example as mat3_inv_det1_example, through the flat
+        // path used by filter_orientation.
+        let a = [1.0, 2.0, 3.0, 0.0, 1.0, 4.0, 5.0, 6.0, 0.0];
+        let mut lu = [0.0; 9];
+        let mut perm = [0usize; 3];
+        let mut b = [0.0; 3];
+        let mut inv = [0.0; 9];
+        assert!(invert_flat_into(&a, 3, &mut lu, &mut perm, &mut b, &mut inv));
+        let expected = [-24.0, 18.0, 5.0, 20.0, -15.0, -4.0, -5.0, 4.0, 1.0];
+        for (actual, want) in inv.iter().zip(expected) {
+            assert!((actual - want).abs() < 1e-12, "{actual} != {want}");
         }
     }
 
     #[test]
-    fn invert_dyn_singular_returns_none() {
-        let a = vec![vec![1.0, 2.0], vec![2.0, 4.0]];
-        assert!(invert_dyn(&a).is_none());
+    fn invert_flat_singular_returns_false() {
+        let a = [1.0, 2.0, 2.0, 4.0];
+        let mut lu = [0.0; 4];
+        let mut perm = [0usize; 2];
+        let mut b = [0.0; 2];
+        let mut inv = [0.0; 4];
+        assert!(!invert_flat_into(&a, 2, &mut lu, &mut perm, &mut b, &mut inv));
     }
 
     #[test]

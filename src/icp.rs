@@ -14,7 +14,7 @@ use crate::correspondence::{
     find_correspondences, kill_outliers_double_with_scratch, kill_outliers_trim_with_scratch,
 };
 use crate::covariance::compute_covariance_exact;
-use crate::laser_data::{LaserData, ScanError};
+use crate::laser_data::{LaserData, OrientationScratch, ScanError};
 use crate::matching::TerminationReason;
 use crate::math::{corr_hash_iter, ominus, pose_diff};
 use crate::params::DistanceMetric;
@@ -36,6 +36,7 @@ pub(crate) fn sm_icp(
         laser_ref.nrays,
         laser_sens.nrays,
         params.stopping.max_iterations.max(0) as usize,
+        params.correspondence.orientation_neighbourhood,
     );
     sm_icp_with_scratch(params, guess, laser_ref, laser_sens, result, &mut scratch)
 }
@@ -75,23 +76,25 @@ pub(crate) fn sm_icp_with_scratch(
     // the derived fields on surviving rays have the same values as CSM.
     if params.correspondence.do_alpha_test {
         laser_ref.simple_clustering(params.correspondence.clustering_threshold);
-        laser_ref.compute_orientation(
+        laser_ref.compute_orientation_with_scratch(
             params.correspondence.orientation_neighbourhood,
             params.correspondence.sigma,
+            &mut scratch.orientation,
         );
         laser_sens.simple_clustering(params.correspondence.clustering_threshold);
-        laser_sens.compute_orientation(
+        laser_sens.compute_orientation_with_scratch(
             params.correspondence.orientation_neighbourhood,
             params.correspondence.sigma,
+            &mut scratch.orientation,
         );
     }
 
     if params.correspondence.do_visibility_test {
         // C: `visibilityTest(laser_ref, x_old)` and
         // `visibilityTest(laser_sens, ominus(x_old))` in `icp.c`.
-        laser_ref.visibility_test(&guess);
+        laser_ref.visibility_test_with_scratch(&guess, &mut scratch.visibility_thetas);
         let sensor_viewpoint = ominus(guess);
-        laser_sens.visibility_test(&sensor_viewpoint);
+        laser_sens.visibility_test_with_scratch(&sensor_viewpoint, &mut scratch.visibility_thetas);
     }
 
     let outcome = icp_loop_with_restart(params, guess, laser_ref, laser_sens, scratch);
@@ -135,6 +138,8 @@ pub(crate) struct IcpScratch {
     distances_by_sensor: Vec<f64>,
     distances: Vec<f64>,
     correspondences: Vec<GpcCorrespondence>,
+    visibility_thetas: Vec<f64>,
+    orientation: OrientationScratch,
     pub(crate) observer: IterationObserver,
     pub(crate) trace_events: Vec<(usize, [f64; 3], f64, usize)>,
     pub(crate) trace_enabled: bool,
@@ -143,13 +148,20 @@ pub(crate) struct IcpScratch {
 type IterationObserver = Option<Box<dyn FnMut(usize, [f64; 3], f64, usize)>>;
 
 impl IcpScratch {
-    pub(crate) fn new(reference_rays: usize, sensor_rays: usize, max_iterations: usize) -> Self {
+    pub(crate) fn new(
+        reference_rays: usize,
+        sensor_rays: usize,
+        max_iterations: usize,
+        orientation_neighbourhood: i32,
+    ) -> Self {
         Self {
             hashes: Vec::with_capacity(max_iterations),
             nearest_distances: vec![0.0; reference_rays],
             distances_by_sensor: vec![0.0; sensor_rays],
             distances: Vec::with_capacity(sensor_rays),
             correspondences: Vec::with_capacity(sensor_rays),
+            visibility_thetas: vec![f64::NAN; reference_rays.max(sensor_rays)],
+            orientation: OrientationScratch::new(orientation_neighbourhood),
             observer: None,
             trace_events: Vec::new(),
             trace_enabled: false,

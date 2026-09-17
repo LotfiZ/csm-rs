@@ -528,3 +528,73 @@ fn no_correspondence_reports_candidate_diagnostics() {
     assert!(!outcome.accepted());
     assert!(outcome.candidate().is_some());
 }
+
+#[test]
+fn capacity_growth_is_explicit_and_reusable() {
+    // Start from prepared-but-empty storage, then fill and grow explicitly.
+    let small_angles: Vec<f64> = (0..32).map(|i| -1.0 + 2.0 * i as f64 / 31.0).collect();
+    let small_readings = vec![8.0; 32];
+    let small_valid = vec![true; 32];
+    let mut workspace = Matcher::default_pose_only()
+        .prepare(
+            PreparedPolarScan::with_capacity(32),
+            PreparedPolarScan::with_capacity(32),
+        )
+        .unwrap();
+    workspace
+        .set_reference_polar(&small_angles, &small_readings, &small_valid)
+        .unwrap();
+    workspace
+        .set_sensor_polar(&small_angles, &small_readings, &small_valid)
+        .unwrap();
+    assert!(workspace.match_once().unwrap().valid);
+
+    workspace.reserve(1024, 1024);
+    assert!(workspace.capacities().0 >= 1024);
+
+    let big_angles: Vec<f64> = (0..900)
+        .map(|i| -1.0 + 2.0 * i as f64 / 899.0)
+        .collect();
+    let big_readings = vec![8.0; 900];
+    let big_valid = vec![true; 900];
+    workspace
+        .set_reference_polar(&big_angles, &big_readings, &big_valid)
+        .unwrap();
+    workspace
+        .set_sensor_polar(&big_angles, &big_readings, &big_valid)
+        .unwrap();
+    assert!(workspace.match_once().unwrap().valid);
+
+    // An out-of-capacity update is a clear error, not a silent growth.
+    let err = workspace
+        .set_sensor_polar(&vec![0.0; 2048], &vec![8.0; 2048], &vec![true; 2048])
+        .unwrap_err();
+    assert!(matches!(err, csm_rs::ScanError::CapacityExceeded { .. }));
+}
+
+#[test]
+fn prepared_matching_supports_large_and_independently_sized_scans() {
+    let big_angles: Vec<f64> = (0..3_500)
+        .map(|i| -1.0 + 2.0 * i as f64 / 3_499.0)
+        .collect();
+    let small_angles: Vec<f64> = (0..200).map(|i| -1.0 + 2.0 * i as f64 / 199.0).collect();
+    let big_readings = vec![8.0; big_angles.len()];
+    let small_readings = vec![8.0; small_angles.len()];
+    let reference = PreparedPolarScan::from_polar(
+        big_angles,
+        big_readings,
+        vec![true; 3_500],
+    )
+    .unwrap();
+    let sensor = PreparedPolarScan::from_polar(
+        small_angles,
+        small_readings,
+        vec![true; 200],
+    )
+    .unwrap();
+    let mut workspace = Matcher::default_pose_only()
+        .prepare(reference, sensor)
+        .unwrap();
+    assert_eq!(workspace.capacities(), (3_500, 200));
+    assert!(workspace.match_once().unwrap().valid);
+}
