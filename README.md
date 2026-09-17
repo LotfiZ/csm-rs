@@ -133,8 +133,18 @@ let estimate = workspace.match_once()?;
 ```
 
 `Matcher::prepare_polar`, `Matcher::prepare_cartesian`, and `Matcher::prepare`
-make scan ownership and workspace reuse explicit. `PreparedMatcher::capacities`
-and `workspace_bytes` support embedded integrations.
+make scan ownership and workspace reuse explicit. Preparation allocates the
+reference and sensor storage, the ICP scratch buffers, and the optional
+orientation/visibility buffers. After that, repeated pose-only matching —
+including input updates, restarts, retained search/outlier/weighting options,
+and unsuccessful outcomes — performs **zero heap allocations**.
+
+`PreparedMatcher::capacities` reports reserved rays, and `workspace_bytes`
+reports the scratch footprint. Grow capacity explicitly with
+`PreparedMatcher::reserve`; an input larger than the reserved capacity returns
+`ScanError::CapacityExceeded` rather than growing during a match. Reference and
+sensor scans may have different sizes, and sizes above 3,000 points are
+supported by sizing the workspace accordingly.
 
 ### Diagnostics
 

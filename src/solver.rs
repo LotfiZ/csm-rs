@@ -302,48 +302,112 @@ fn dot2(a: &[f64; 2], b: &[f64; 2]) -> f64 {
 ///
 /// C: `poly_greatest_real_root()` in `sm/lib/gpc/gpc_utils.c`
 fn greatest_real_root(coefficients: &[f64]) -> Option<f64> {
-    real_roots(coefficients)
-        .into_iter()
+    let roots = real_roots(coefficients);
+    roots.values[..roots.len]
+        .iter()
+        .copied()
         .max_by(|a, b| a.partial_cmp(b).unwrap())
 }
 
-fn real_roots(coefficients: &[f64]) -> Vec<f64> {
-    let mut coefficients = coefficients.to_vec();
-    while coefficients.len() > 1 && coefficients.last() == Some(&0.0) {
-        coefficients.pop();
+/// Fixed-capacity real-root set. GPC's polynomial is a quartic, so eight slots
+/// cover every root of the polynomial and of its recursion derivatives without
+/// heap allocation in the prepared matching path.
+const MAX_ROOTS: usize = 64;
+
+#[derive(Clone, Copy)]
+struct Roots {
+    values: [f64; MAX_ROOTS],
+    len: usize,
+}
+
+impl Roots {
+    fn new() -> Self {
+        Self {
+            values: [0.0; MAX_ROOTS],
+            len: 0,
+        }
     }
-    let degree = coefficients.len().saturating_sub(1);
+
+    fn push(&mut self, value: f64) {
+        if self.len < MAX_ROOTS {
+            self.values[self.len] = value;
+            self.len += 1;
+        }
+    }
+
+    /// Sort ascending and drop near-duplicates within `tolerance`.
+    fn sort_and_dedup(&mut self, tolerance: f64) {
+        let slice = &mut self.values[..self.len];
+        slice.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        let mut write = 0;
+        for read in 0..self.len {
+            let distinct = write == 0
+                || (slice[read] - slice[write - 1]).abs()
+                    > tolerance * slice[read].abs().max(slice[write - 1].abs()).max(1.0);
+            if distinct {
+                slice[write] = slice[read];
+                write += 1;
+            }
+        }
+        self.len = write;
+    }
+}
+
+/// Real roots of a polynomial with coefficients ascending in degree.
+///
+/// Allocation-free: the quartic GPC polynomial bounds the recursion depth, so
+/// stack arrays cover every intermediate polynomial.
+fn real_roots(coefficients: &[f64]) -> Roots {
+    roots_impl(coefficients)
+}
+
+/// Recursive root finder using stack-only storage.
+fn roots_impl(coefficients: &[f64]) -> Roots {
+    let mut coeffs = [0.0f64; MAX_ROOTS];
+    let mut n = coefficients.len().min(MAX_ROOTS);
+    coeffs[..n].copy_from_slice(&coefficients[..n]);
+    while n > 1 && coeffs[n - 1] == 0.0 {
+        n -= 1;
+    }
+    let degree = n.saturating_sub(1);
     if degree == 0 {
-        return Vec::new();
+        return Roots::new();
     }
     if degree == 1 {
-        return if coefficients[1] == 0.0 {
-            Vec::new()
-        } else {
-            vec![-coefficients[0] / coefficients[1]]
-        };
+        let mut result = Roots::new();
+        if coeffs[1] != 0.0 {
+            result.push(-coeffs[0] / coeffs[1]);
+        }
+        return result;
     }
 
-    let derivative: Vec<f64> = coefficients
-        .iter()
-        .enumerate()
-        .skip(1)
-        .map(|(degree, coefficient)| degree as f64 * coefficient)
-        .collect();
-    let bound = cauchy_bound(&coefficients);
-    let mut critical: Vec<f64> = real_roots(&derivative)
-        .into_iter()
-        .filter(|root| root.is_finite() && *root > -bound && *root < bound)
-        .collect();
-    critical.sort_by(|a, b| a.partial_cmp(b).unwrap());
-    critical.dedup_by(|a, b| (*a - *b).abs() <= 1e-14 * a.abs().max(b.abs()).max(1.0));
+    let mut derivative = [0.0f64; MAX_ROOTS];
+    for i in 1..n {
+        derivative[i - 1] = i as f64 * coeffs[i];
+    }
+    let bound = cauchy_bound(&coeffs[..n]);
+    let derivative_roots = roots_impl(&derivative[..n - 1]);
 
-    let mut points = Vec::with_capacity(critical.len() + 2);
-    points.push(-bound);
-    points.extend(critical.iter().copied());
-    points.push(bound);
+    let mut critical = Roots::new();
+    for root in derivative_roots.values[..derivative_roots.len].iter().copied() {
+        if root.is_finite() && root > -bound && root < bound {
+            critical.push(root);
+        }
+    }
+    critical.sort_and_dedup(1e-14);
 
-    let function_scale = coefficients
+    let mut points = [0.0f64; MAX_ROOTS + 2];
+    let mut point_count = 0;
+    points[point_count] = -bound;
+    point_count += 1;
+    for root in critical.values[..critical.len].iter().copied() {
+        points[point_count] = root;
+        point_count += 1;
+    }
+    points[point_count] = bound;
+    point_count += 1;
+
+    let function_scale = coeffs[..n]
         .iter()
         .enumerate()
         .map(|(degree, coefficient)| coefficient.abs() * bound.powi(degree as i32))
@@ -351,18 +415,18 @@ fn real_roots(coefficients: &[f64]) -> Vec<f64> {
         .max(1.0);
     let function_tolerance = 1e-12 * function_scale;
 
-    let mut roots = Vec::new();
-    for &point in &critical {
-        if poly_eval(&coefficients, point).abs() <= function_tolerance {
+    let mut roots = Roots::new();
+    for point in critical.values[..critical.len].iter().copied() {
+        if poly_eval(&coeffs[..n], point).abs() <= function_tolerance {
             roots.push(point);
         }
     }
 
-    for interval in points.windows(2) {
-        let mut left = interval[0];
-        let mut right = interval[1];
-        let mut left_value = poly_eval(&coefficients, left);
-        let right_value = poly_eval(&coefficients, right);
+    for window in points[..point_count].windows(2) {
+        let mut left = window[0];
+        let mut right = window[1];
+        let mut left_value = poly_eval(&coeffs[..n], left);
+        let right_value = poly_eval(&coeffs[..n], right);
         if left_value == 0.0 {
             roots.push(left);
             continue;
@@ -383,7 +447,7 @@ fn real_roots(coefficients: &[f64]) -> Vec<f64> {
             if middle == left || middle == right {
                 break;
             }
-            let middle_value = poly_eval(&coefficients, middle);
+            let middle_value = poly_eval(&coeffs[..n], middle);
             if middle_value == 0.0 {
                 left = middle;
                 right = middle;
@@ -402,8 +466,7 @@ fn real_roots(coefficients: &[f64]) -> Vec<f64> {
         roots.push(0.5 * (left + right));
     }
 
-    roots.sort_by(|a, b| a.partial_cmp(b).unwrap());
-    roots.dedup_by(|a, b| (*a - *b).abs() <= 1e-12 * a.abs().max(b.abs()).max(1.0));
+    roots.sort_and_dedup(1e-12);
     roots
 }
 

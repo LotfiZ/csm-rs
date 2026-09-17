@@ -204,6 +204,109 @@ impl LaserData {
         Ok(scan)
     }
 
+    /// Allocate per-ray storage for `capacity` rays without committing to a
+    /// scan shape. Use [`Self::resize_rays`] to grow into it without further
+    /// allocation.
+    pub fn with_capacity(capacity: usize) -> Self {
+        Self {
+            nrays: 0,
+            min_theta: f64::NAN,
+            max_theta: f64::NAN,
+            theta: Vec::with_capacity(capacity),
+            valid: Vec::with_capacity(capacity),
+            readings: Vec::with_capacity(capacity),
+            readings_sigma: Vec::with_capacity(capacity),
+            cluster: Vec::with_capacity(capacity),
+            alpha: Vec::with_capacity(capacity),
+            cov_alpha: Vec::with_capacity(capacity),
+            alpha_valid: Vec::with_capacity(capacity),
+            true_alpha: Vec::with_capacity(capacity),
+            corr: Vec::with_capacity(capacity),
+            points: Vec::with_capacity(capacity),
+            points_w: Vec::with_capacity(capacity),
+            up_bigger: Vec::with_capacity(capacity),
+            up_smaller: Vec::with_capacity(capacity),
+            down_bigger: Vec::with_capacity(capacity),
+            down_smaller: Vec::with_capacity(capacity),
+        }
+    }
+
+    /// Reserved ray capacity across the per-ray arrays.
+    pub fn capacity(&self) -> usize {
+        self.theta.capacity()
+    }
+
+    /// Reserve room for at least `capacity` rays without changing the current
+    /// scan shape. This is the only operation that grows a prepared scan.
+    pub fn reserve_rays(&mut self, capacity: usize) {
+        self.theta.reserve(capacity.saturating_sub(self.theta.len()));
+        self.valid.reserve(capacity.saturating_sub(self.valid.len()));
+        self.readings
+            .reserve(capacity.saturating_sub(self.readings.len()));
+        self.readings_sigma
+            .reserve(capacity.saturating_sub(self.readings_sigma.len()));
+        self.cluster
+            .reserve(capacity.saturating_sub(self.cluster.len()));
+        self.alpha.reserve(capacity.saturating_sub(self.alpha.len()));
+        self.cov_alpha
+            .reserve(capacity.saturating_sub(self.cov_alpha.len()));
+        self.alpha_valid
+            .reserve(capacity.saturating_sub(self.alpha_valid.len()));
+        self.true_alpha
+            .reserve(capacity.saturating_sub(self.true_alpha.len()));
+        self.corr.reserve(capacity.saturating_sub(self.corr.len()));
+        self.points
+            .reserve(capacity.saturating_sub(self.points.len()));
+        self.points_w
+            .reserve(capacity.saturating_sub(self.points_w.len()));
+        self.up_bigger
+            .reserve(capacity.saturating_sub(self.up_bigger.len()));
+        self.up_smaller
+            .reserve(capacity.saturating_sub(self.up_smaller.len()));
+        self.down_bigger
+            .reserve(capacity.saturating_sub(self.down_bigger.len()));
+        self.down_smaller
+            .reserve(capacity.saturating_sub(self.down_smaller.len()));
+    }
+
+    /// Resize the scan to exactly `nrays` rays, resetting every per-ray array.
+    /// The caller must have reserved at least `nrays` capacity and then fills
+    /// `theta`, `readings`, and `valid` before validating.
+    pub fn resize_rays(&mut self, nrays: usize) {
+        self.nrays = nrays;
+        self.theta.resize(nrays, f64::NAN);
+        self.valid.resize(nrays, false);
+        self.readings.resize(nrays, f64::NAN);
+        self.readings_sigma.resize(nrays, f64::NAN);
+        self.cluster.resize(nrays, -1);
+        self.alpha.resize(nrays, f64::NAN);
+        self.cov_alpha.resize(nrays, f64::NAN);
+        self.alpha_valid.resize(nrays, false);
+        self.true_alpha.resize(nrays, f64::NAN);
+        self.corr.resize(nrays, Correspondence::default());
+        let nan_point = Point2d {
+            p: [f64::NAN, f64::NAN],
+            rho: f64::NAN,
+            phi: f64::NAN,
+        };
+        self.points.resize(nrays, nan_point);
+        self.points_w.resize(nrays, nan_point);
+        self.up_bigger.resize(nrays, 0);
+        self.up_smaller.resize(nrays, 0);
+        self.down_bigger.resize(nrays, 0);
+        self.down_smaller.resize(nrays, 0);
+        self.reset_derived();
+    }
+
+    pub(crate) fn reset_derived(&mut self) {
+        self.cluster.fill(-1);
+        self.alpha.fill(f64::NAN);
+        self.cov_alpha.fill(f64::NAN);
+        self.alpha_valid.fill(false);
+        self.true_alpha.fill(f64::NAN);
+        self.corr.fill(Default::default());
+    }
+
     /// Mark valid rays outside `(min_reading, max_reading]` as invalid.
     ///
     /// C: `ld_invalid_if_outside()` in `icp/icp.c`
@@ -261,8 +364,20 @@ impl LaserData {
     /// C: `visibilityTest()` in `sm/csm/icp/icp_outliers.c`. The C routine
     /// uses only the viewpoint translation; the pose angle is intentionally
     /// ignored.
+    #[cfg(test)]
     pub fn visibility_test(&mut self, viewpoint: &[f64; 3]) {
         let mut theta_from_viewpoint = vec![f64::NAN; self.nrays];
+        self.visibility_test_with_scratch(viewpoint, &mut theta_from_viewpoint);
+    }
+
+    /// Allocation-free [`Self::visibility_test`] using a caller-owned buffer.
+    pub fn visibility_test_with_scratch(
+        &mut self,
+        viewpoint: &[f64; 3],
+        theta_from_viewpoint: &mut Vec<f64>,
+    ) {
+        theta_from_viewpoint.clear();
+        theta_from_viewpoint.resize(self.nrays, f64::NAN);
         for (i, angle) in theta_from_viewpoint.iter_mut().enumerate() {
             if !self.valid[i] {
                 continue;
@@ -348,9 +463,16 @@ impl LaserData {
     ///
     /// C: `find_neighbours()` in `orientation.c` — note the asymmetric
     /// bounds (`up+1 <= i+max_num` vs `down >= i-max_num`), ported as-is.
+    #[cfg(test)]
     fn find_neighbours(&self, i: usize, max_num: i32) -> Vec<usize> {
-        let i32_i = i as i32;
         let mut indexes = Vec::new();
+        self.find_neighbours_into(i, max_num, &mut indexes);
+        indexes
+    }
+
+    fn find_neighbours_into(&self, i: usize, max_num: i32, indexes: &mut Vec<usize>) {
+        indexes.clear();
+        let i32_i = i as i32;
         let mut up = i32_i;
         while up < i32_i + max_num
             && (up + 1) < self.nrays as i32
@@ -369,14 +491,26 @@ impl LaserData {
             down -= 1;
             indexes.push(down as usize);
         }
-        indexes
     }
 
     /// Estimate the local surface orientation at each valid, clustered ray.
     /// Requires `cluster` to be set (see [`Self::simple_clustering`]).
     ///
     /// C: `ld_compute_orientation()` in `orientation.c`
+    #[cfg(test)]
     pub fn compute_orientation(&mut self, size_neighbourhood: i32, sigma: f64) {
+        let mut scratch = OrientationScratch::new(size_neighbourhood);
+        self.compute_orientation_with_scratch(size_neighbourhood, sigma, &mut scratch);
+    }
+
+    /// Allocation-free [`Self::compute_orientation`] using caller-owned scratch.
+    pub fn compute_orientation_with_scratch(
+        &mut self,
+        size_neighbourhood: i32,
+        sigma: f64,
+        scratch: &mut OrientationScratch,
+    ) {
+        scratch.prepare(size_neighbourhood);
         for i in 0..self.nrays {
             if !self.valid[i] || self.cluster[i] == -1 {
                 self.alpha[i] = f64::NAN;
@@ -384,17 +518,33 @@ impl LaserData {
                 self.alpha_valid[i] = false;
                 continue;
             }
-            let neighbours = self.find_neighbours(i, size_neighbourhood);
-            if neighbours.is_empty() {
+            self.find_neighbours_into(i, size_neighbourhood, &mut scratch.neighbours);
+            let n = scratch.neighbours.len();
+            if n == 0 {
                 self.alpha[i] = f64::NAN;
                 self.cov_alpha[i] = f64::NAN;
                 self.alpha_valid[i] = false;
                 continue;
             }
-            let thetas: Vec<f64> = neighbours.iter().map(|&j| self.theta[j]).collect();
-            let readings: Vec<f64> = neighbours.iter().map(|&j| self.readings[j]).collect();
+            for (k, &j) in scratch.neighbours.iter().enumerate() {
+                scratch.thetas[k] = self.theta[j];
+                scratch.rhos[k] = self.readings[j];
+            }
+            let OrientationScratch {
+                thetas,
+                rhos,
+                y,
+                r,
+                rrt,
+                lu,
+                perm,
+                erinv,
+                erinv_y,
+                b,
+                ..
+            } = scratch;
             let (alpha, cov0_alpha) =
-                filter_orientation(self.theta[i], self.readings[i], &thetas, &readings);
+                filter_orientation_into(self.theta[i], self.readings[i], &thetas[..n], &rhos[..n], y, r, rrt, lu, perm, erinv, erinv_y, b);
             if alpha.is_nan() {
                 self.alpha[i] = f64::NAN;
                 self.cov_alpha[i] = f64::NAN;
@@ -574,39 +724,105 @@ impl std::fmt::Display for ScanError {
 
 impl std::error::Error for ScanError {}
 
+/// Reusable scratch for the optional orientation filter. Sized once from the
+/// configured neighbourhood so prepared matching never allocates for it.
+pub(crate) struct OrientationScratch {
+    max_n: usize,
+    neighbours: Vec<usize>,
+    thetas: Vec<f64>,
+    rhos: Vec<f64>,
+    y: Vec<f64>,
+    r: Vec<f64>,
+    rrt: Vec<f64>,
+    lu: Vec<f64>,
+    perm: Vec<usize>,
+    erinv: Vec<f64>,
+    erinv_y: Vec<f64>,
+    b: Vec<f64>,
+}
+
+impl OrientationScratch {
+    pub(crate) fn new(size_neighbourhood: i32) -> Self {
+        let max_n = 2 * size_neighbourhood.max(0) as usize + 1;
+        Self {
+            max_n,
+            neighbours: Vec::with_capacity(max_n),
+            thetas: vec![0.0; max_n],
+            rhos: vec![0.0; max_n],
+            y: vec![0.0; max_n],
+            r: vec![0.0; max_n * (max_n + 1)],
+            rrt: vec![0.0; max_n * max_n],
+            lu: vec![0.0; max_n * max_n],
+            perm: vec![0; max_n],
+            erinv: vec![0.0; max_n * max_n],
+            erinv_y: vec![0.0; max_n],
+            b: vec![0.0; max_n],
+        }
+    }
+
+    fn prepare(&mut self, size_neighbourhood: i32) {
+        let max_n = 2 * size_neighbourhood.max(0) as usize + 1;
+        if max_n > self.max_n {
+            *self = Self::new(size_neighbourhood);
+        }
+    }
+}
+
 /// Weighted least-squares orientation filter. Returns `(alpha, cov0_alpha)`;
 /// `alpha` is NaN when the system is singular.
 ///
 /// C: `filter_orientation()` in `orientation.c`. The model is
 /// `Y = L·f1 + R·ε` with `L = ones(n)`, solved via the n×n inverse of
-/// `R·Rᵀ` (egsl in C; [`crate::math::invert_dyn`] here).
-fn filter_orientation(theta0: f64, rho0: f64, thetas: &[f64], rhos: &[f64]) -> (f64, f64) {
+/// `R·Rᵀ` (egsl in C; [`crate::math::invert_flat_into`] here).
+#[allow(clippy::too_many_arguments)]
+fn filter_orientation_into(
+    theta0: f64,
+    rho0: f64,
+    thetas: &[f64],
+    rhos: &[f64],
+    y: &mut [f64],
+    r: &mut [f64],
+    rrt: &mut [f64],
+    lu: &mut [f64],
+    perm: &mut [usize],
+    erinv: &mut [f64],
+    erinv_y: &mut [f64],
+    b: &mut [f64],
+) -> (f64, f64) {
     let n = thetas.len();
     // Y[i] = (rho_i - rho0) / (theta_i - theta0)
     // R[i,0] = -1/(theta_i - theta0), R[i,i+1] = +1/(theta_i - theta0)
-    let mut y = vec![0.0; n];
-    let mut rrt = vec![vec![0.0; n]; n];
-    let mut r: Vec<Vec<f64>> = vec![vec![0.0; n + 1]; n];
+    r[..n * (n + 1)].fill(0.0);
     for i in 0..n {
         let dt = thetas[i] - theta0;
         y[i] = (rhos[i] - rho0) / dt;
-        r[i][0] = -1.0 / dt;
-        r[i][i + 1] = 1.0 / dt;
+        r[i * (n + 1)] = -1.0 / dt;
+        r[i * (n + 1) + i + 1] = 1.0 / dt;
     }
     for i in 0..n {
         for j in 0..n {
-            rrt[i][j] = (0..=n).map(|k| r[i][k] * r[j][k]).sum();
+            rrt[i * n + j] = (0..=n)
+                .map(|k| r[i * (n + 1) + k] * r[j * (n + 1) + k])
+                .sum();
         }
     }
-    let Some(erinv) = crate::math::invert_dyn(&rrt) else {
+    if !crate::math::invert_flat_into(
+        &rrt[..n * n],
+        n,
+        &mut lu[..n * n],
+        &mut perm[..n],
+        &mut b[..n],
+        &mut erinv[..n * n],
+    ) {
         return (f64::NAN, f64::NAN);
-    };
+    }
     // L = ones(n): Lᵀ·eRinv·L is the sum of all entries (scalar);
     // Lᵀ·eRinv·Y is the sum of entries of eRinv·Y (scalar).
     let mut sum_all = 0.0;
-    let mut erinv_y = vec![0.0; n];
-    for (i, row) in erinv.iter().enumerate() {
-        for (j, &e) in row.iter().enumerate() {
+    for i in 0..n {
+        erinv_y[i] = 0.0;
+        for j in 0..n {
+            let e = erinv[i * n + j];
             sum_all += e;
             erinv_y[i] += e * y[j];
         }
@@ -615,7 +831,7 @@ fn filter_orientation(theta0: f64, rho0: f64, thetas: &[f64], rhos: &[f64]) -> (
         return (f64::NAN, f64::NAN);
     }
     let cov_f1 = 1.0 / sum_all;
-    let f1 = cov_f1 * erinv_y.iter().sum::<f64>();
+    let f1 = cov_f1 * erinv_y[..n].iter().sum::<f64>();
 
     let mut alpha = theta0 - (f1 / rho0).atan();
     if alpha.cos() * theta0.cos() + alpha.sin() * theta0.sin() > 0.0 {

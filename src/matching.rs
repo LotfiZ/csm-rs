@@ -19,6 +19,10 @@ use crate::{
 #[derive(Clone, Debug)]
 pub struct PreparedPolarScan {
     data: LaserData,
+    /// The caller's validity flags. Matching temporarily invalidates rays
+    /// (reading bounds, visibility), so the input is restored before every
+    /// match to avoid stale state across frames.
+    input_valid: Vec<bool>,
 }
 
 impl PreparedPolarScan {
@@ -27,8 +31,10 @@ impl PreparedPolarScan {
         readings: Vec<f64>,
         valid: Vec<bool>,
     ) -> Result<Self, ScanError> {
+        let data = LaserData::from_polar(angles, readings, valid.clone())?;
         Ok(Self {
-            data: LaserData::from_polar(angles, readings, valid)?,
+            data,
+            input_valid: valid,
         })
     }
 
@@ -48,6 +54,98 @@ impl PreparedPolarScan {
         Self::from_polar(angles, readings, valid.to_vec())
     }
 
+    /// Reserve storage for `capacity` rays without choosing a scan yet.
+    /// Use [`Self::set_polar`] or [`Self::set_cartesian`] to fill it without
+    /// further allocation.
+    pub fn with_capacity(capacity: usize) -> Self {
+        Self {
+            data: LaserData::with_capacity(capacity),
+            input_valid: Vec::with_capacity(capacity),
+        }
+    }
+
+    /// Reserve room for at least `capacity` rays. This is the explicit growth
+    /// operation; matching never grows storage on its own.
+    pub fn reserve(&mut self, capacity: usize) {
+        self.data.reserve_rays(capacity);
+        self.input_valid
+            .reserve(capacity.saturating_sub(self.input_valid.len()));
+    }
+
+    /// Restore the caller's input validity and clear derived state before a
+    /// match. Allocation-free and idempotent.
+    pub(crate) fn prepare_for_match(&mut self) {
+        if self.data.valid.len() == self.input_valid.len() {
+            self.data.valid.copy_from_slice(&self.input_valid);
+        }
+        self.data.reset_derived();
+    }
+
+    /// Replace the scan contents, growing only up to the reserved capacity.
+    ///
+    /// Angles, readings, and validity must have equal length. The scan is
+    /// revalidated and all derived fields are reset, so no stale state from a
+    /// previous frame survives.
+    pub fn set_polar(
+        &mut self,
+        angles: &[f64],
+        readings: &[f64],
+        valid: &[bool],
+    ) -> Result<(), ScanError> {
+        if readings.len() != angles.len() {
+            return Err(ScanError::InconsistentLengths {
+                field: "readings",
+                expected: angles.len(),
+                actual: readings.len(),
+            });
+        }
+        if valid.len() != angles.len() {
+            return Err(ScanError::InconsistentLengths {
+                field: "valid",
+                expected: angles.len(),
+                actual: valid.len(),
+            });
+        }
+        if angles.len() > self.data.capacity() {
+            return Err(ScanError::CapacityExceeded {
+                capacity: self.data.capacity(),
+                requested: angles.len(),
+            });
+        }
+        self.data.resize_rays(angles.len());
+        self.data.theta.copy_from_slice(angles);
+        self.data.readings.copy_from_slice(readings);
+        self.data.valid.copy_from_slice(valid);
+        self.input_valid.clear();
+        self.input_valid.extend_from_slice(valid);
+        self.data.min_theta = angles.first().copied().unwrap_or(f64::NAN);
+        self.data.max_theta = angles.last().copied().unwrap_or(f64::NAN);
+        self.data.validate()
+    }
+
+    /// Replace the scan with ordered Cartesian points.
+    pub fn set_cartesian(
+        &mut self,
+        points: &[[f64; 2]],
+        valid: &[bool],
+    ) -> Result<(), ScanError> {
+        let scan = CartesianScan::new(points, valid)?;
+        let (angles, readings) = scan.to_polar_parts();
+        self.set_polar(&angles, &readings, valid)
+    }
+
+    /// Replace the scan with ordered Cartesian points and explicit bearings.
+    pub fn set_cartesian_with_angles(
+        &mut self,
+        points: &[[f64; 2]],
+        angles: &[f64],
+        valid: &[bool],
+    ) -> Result<(), ScanError> {
+        let scan = CartesianScan::with_angles(points, angles, valid)?;
+        let (angles, readings) = scan.to_polar_parts();
+        self.set_polar(&angles, &readings, valid)
+    }
+
     pub fn len(&self) -> usize {
         self.data.nrays
     }
@@ -57,7 +155,7 @@ impl PreparedPolarScan {
     }
 
     pub fn capacity(&self) -> usize {
-        self.data.theta.capacity()
+        self.data.capacity()
     }
 
     pub fn angles(&self) -> &[f64] {
@@ -96,7 +194,8 @@ impl PreparedPolarScan {
         }
         self.data.readings.copy_from_slice(readings);
         self.data.valid.copy_from_slice(valid);
-        self.reset_derived();
+        self.input_valid.copy_from_slice(valid);
+        self.data.reset_derived();
         self.data.validate()
     }
 
@@ -124,17 +223,9 @@ impl PreparedPolarScan {
             *reading = point[0].hypot(point[1]);
         }
         self.data.valid.copy_from_slice(valid);
-        self.reset_derived();
+        self.input_valid.copy_from_slice(valid);
+        self.data.reset_derived();
         self.data.validate()
-    }
-
-    fn reset_derived(&mut self) {
-        self.data.cluster.fill(-1);
-        self.data.alpha.fill(f64::NAN);
-        self.data.cov_alpha.fill(f64::NAN);
-        self.data.alpha_valid.fill(false);
-        self.data.true_alpha.fill(f64::NAN);
-        self.data.corr.fill(Default::default());
     }
 }
 
@@ -156,13 +247,14 @@ impl PreparedMatcher {
         reference: PreparedPolarScan,
         sensor: PreparedPolarScan,
     ) -> Result<Self, ScanError> {
-        if reference.is_empty() || sensor.is_empty() {
+        if reference.capacity() == 0 || sensor.capacity() == 0 {
             return Err(ScanError::NraysOutOfRange);
         }
         let scratch = icp::IcpScratch::new(
-            reference.len(),
-            sensor.len(),
+            reference.capacity().max(reference.len()),
+            sensor.capacity().max(sensor.len()),
             matcher.params.stopping.max_iterations.max(0) as usize,
+            matcher.params.correspondence.orientation_neighbourhood,
         );
         Ok(Self {
             matcher,
@@ -170,6 +262,57 @@ impl PreparedMatcher {
             sensor,
             scratch,
         })
+    }
+
+    /// Reserve reference and sensor capacity, then rebuild the workspace. This
+    /// is the explicit growth operation: matching itself never grows storage.
+    pub fn reserve(&mut self, reference_capacity: usize, sensor_capacity: usize) {
+        self.reference.reserve(reference_capacity);
+        self.sensor.reserve(sensor_capacity);
+        self.scratch = icp::IcpScratch::new(
+            self.reference.capacity().max(self.reference.len()),
+            self.sensor.capacity().max(self.sensor.len()),
+            self.matcher.params.stopping.max_iterations.max(0) as usize,
+            self.matcher.params.correspondence.orientation_neighbourhood,
+        );
+    }
+
+    /// Replace the reference frame, growing only up to reserved capacity.
+    pub fn set_reference_polar(
+        &mut self,
+        angles: &[f64],
+        readings: &[f64],
+        valid: &[bool],
+    ) -> Result<(), ScanError> {
+        self.reference.set_polar(angles, readings, valid)
+    }
+
+    /// Replace the sensor frame, growing only up to reserved capacity.
+    pub fn set_sensor_polar(
+        &mut self,
+        angles: &[f64],
+        readings: &[f64],
+        valid: &[bool],
+    ) -> Result<(), ScanError> {
+        self.sensor.set_polar(angles, readings, valid)
+    }
+
+    /// Replace the reference frame with ordered Cartesian points.
+    pub fn set_reference_cartesian(
+        &mut self,
+        points: &[[f64; 2]],
+        valid: &[bool],
+    ) -> Result<(), ScanError> {
+        self.reference.set_cartesian(points, valid)
+    }
+
+    /// Replace the sensor frame with ordered Cartesian points.
+    pub fn set_sensor_cartesian(
+        &mut self,
+        points: &[[f64; 2]],
+        valid: &[bool],
+    ) -> Result<(), ScanError> {
+        self.sensor.set_cartesian(points, valid)
     }
 
     pub fn reference(&self) -> &PreparedPolarScan {
@@ -233,6 +376,8 @@ impl PreparedMatcher {
 
     /// Match the current frames with an explicit initial pose.
     pub fn match_once_from(&mut self, guess: Pose) -> Result<MatchOutcome, ScanError> {
+        self.reference.prepare_for_match();
+        self.sensor.prepare_for_match();
         let mut result = SmResult::default();
         let termination = icp::sm_icp_with_scratch(
             &self.matcher.params,
@@ -555,6 +700,8 @@ impl Matcher {
         sensor: &mut PreparedPolarScan,
         guess: Pose,
     ) -> Result<MatchOutcome, ScanError> {
+        reference.prepare_for_match();
+        sensor.prepare_for_match();
         self.match_laser(&mut reference.data, &mut sensor.data, guess)
     }
 
