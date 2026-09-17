@@ -8,7 +8,8 @@ use axum::{
     routing::{get, post},
     Json, Router,
 };
-use csm_rs::{Matcher, Params, PolarScan, Pose};
+use csm_rs::{Matcher, Params, PolarScan, Pose, PreparedMatcher, PreparedPolarScan};
+use std::time::Instant;
 use serde::{Deserialize, Serialize};
 
 use scene::Scene;
@@ -55,12 +56,101 @@ pub struct FrameResponse {
     pub nvalid: i32,
     pub error: f64,
     pub covariance_status: String,
+    /// Per-iteration instrumentation, present only when tracing is requested.
+    pub trace: Option<Vec<TraceIteration>>,
+    /// Wall-clock time for an uninstrumented prepared match, in milliseconds.
+    pub normal_ms: f64,
+    /// Wall-clock time for the instrumented match, in milliseconds.
+    pub instrumented_ms: f64,
     pub reference: Vec<[f64; 2]>,
     pub sensor_unaligned: Vec<[f64; 2]>,
     pub sensor_aligned: Vec<[f64; 2]>,
     pub sensor_true: Vec<[f64; 2]>,
     pub extent: f64,
     pub segments: Vec<[[f64; 2]; 2]>,
+}
+
+/// One traced iteration sent to the browser.
+#[derive(Serialize, Deserialize)]
+pub struct TraceIteration {
+    pub iteration: usize,
+    pub pose: [f64; 3],
+    pub error: f64,
+    pub valid_correspondences: usize,
+    pub restart: bool,
+    pub correspondences: Vec<TraceCorrespondence>,
+}
+
+/// One correspondence in a traced iteration.
+#[derive(Serialize, Deserialize)]
+pub struct TraceCorrespondence {
+    pub sensor_ray: usize,
+    pub reference_j1: i32,
+    pub reference_j2: i32,
+    pub distance: f64,
+    pub sensor_point: [f64; 2],
+    pub reference_point: [f64; 2],
+}
+
+/// Run an uninstrumented and an instrumented prepared match on the same frames
+/// and return the trace plus both timings.
+fn run_trace(
+    reference: &ScanFrame,
+    sensor: &ScanFrame,
+    config: &SimConfig,
+    guess: Pose,
+) -> Result<(Option<Vec<TraceIteration>>, f64, f64), String> {
+    let prepare_start = Instant::now();
+    let reference = PreparedPolarScan::from_polar(
+        reference.angles.clone(),
+        reference.readings.clone(),
+        reference.valid.clone(),
+    )
+    .map_err(|error| error.to_string())?;
+    let sensor = PreparedPolarScan::from_polar(
+        sensor.angles.clone(),
+        sensor.readings.clone(),
+        sensor.valid.clone(),
+    )
+    .map_err(|error| error.to_string())?;
+    let matcher = Matcher::new(params_from(config)).map_err(|error| error.to_string())?;
+    let mut workspace = PreparedMatcher::new(matcher, reference, sensor)
+        .map_err(|error| error.to_string())?;
+    let _prepare_ms = prepare_start.elapsed().as_secs_f64() * 1e3;
+
+    let normal_start = Instant::now();
+    workspace
+        .match_once_from(guess)
+        .map_err(|error| error.to_string())?;
+    let normal_ms = normal_start.elapsed().as_secs_f64() * 1e3;
+
+    let instrumented_start = Instant::now();
+    let mut trace = Vec::new();
+    workspace
+        .match_once_traced(|snapshot| {
+            trace.push(TraceIteration {
+                iteration: snapshot.iteration,
+                pose: snapshot.pose,
+                error: snapshot.error,
+                valid_correspondences: snapshot.valid_correspondences,
+                restart: snapshot.restart,
+                correspondences: snapshot
+                    .correspondences
+                    .into_iter()
+                    .map(|corr| TraceCorrespondence {
+                        sensor_ray: corr.sensor_ray,
+                        reference_j1: corr.reference_j1,
+                        reference_j2: corr.reference_j2,
+                        distance: corr.distance,
+                        sensor_point: corr.sensor_point,
+                        reference_point: corr.reference_point,
+                    })
+                    .collect(),
+            });
+        })
+        .map_err(|error| error.to_string())?;
+    let instrumented_ms = instrumented_start.elapsed().as_secs_f64() * 1e3;
+    Ok((Some(trace), normal_ms, instrumented_ms))
 }
 
 fn world_points(scan: &ScanFrame, transform: Pose) -> Vec<[f64; 2]> {
@@ -194,6 +284,11 @@ pub fn run_frame(config: &SimConfig) -> Result<FrameResponse, String> {
         pose_at(&config.scenario, config.step, config.motion),
     );
     let drift = total_truth.inverse().compose(state.estimate);
+    let (trace, normal_ms, instrumented_ms) = if config.trace {
+        run_trace(&state.reference, &state.sensor, config, state.guess)?
+    } else {
+        (None, 0.0, 0.0)
+    };
 
     Ok(FrameResponse {
         request_id: config.request_id,
@@ -213,6 +308,9 @@ pub fn run_frame(config: &SimConfig) -> Result<FrameResponse, String> {
         nvalid: state.outcome.nvalid,
         error: state.outcome.error,
         covariance_status: format!("{:?}", state.outcome.covariance_status),
+        trace,
+        normal_ms,
+        instrumented_ms,
         reference: world_points(&state.reference, Pose::IDENTITY),
         sensor_unaligned: world_points(&state.sensor, state.guess),
         sensor_aligned: world_points(&state.sensor, state.relative_estimate),

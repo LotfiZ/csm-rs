@@ -47,6 +47,8 @@ pub struct SimConfig {
     pub step: u64,
     pub do_alpha_test: bool,
     pub do_visibility_test: bool,
+    /// Whether to collect per-iteration instrumentation.
+    pub trace: bool,
     pub remove_doubles: bool,
     pub outliers_max_perc: f64,
     pub request_id: u64,
@@ -71,6 +73,7 @@ impl Default for SimConfig {
             step: 0,
             do_alpha_test: false,
             do_visibility_test: false,
+            trace: false,
             remove_doubles: true,
             outliers_max_perc: 0.95,
             request_id: 0,

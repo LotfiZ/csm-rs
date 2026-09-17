@@ -43,6 +43,20 @@ initial-guess error are independent controls, and advanced matching
 configuration is exposed progressively behind a details panel and passed to
 the real matcher.
 
+## Iteration inspection
+
+Tracing is opt-in. Enable **iteration inspection** in the advanced panel to
+receive the real matcher iterations: each carries the pose update, residual
+error, valid-correspondence count, whether it came from a restart perturbation,
+and the contributing correspondences in reference-frame coordinates. Use the
+iteration slider to step through them; correspondence lines are coloured by
+distance.
+
+Instrumented timing is reported separately from an uninstrumented prepared
+match (`normal / instrumented`), and tracing runs the same matching path, so
+traced and untraced poses agree. Per-iteration correspondence storage is
+allocated only when tracing is enabled.
+
 ## Design
 
 - The server is **stateless**: every `POST /api/frame` regenerates the seeded
