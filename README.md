@@ -122,14 +122,15 @@ guarantee.
 
 ## Interactive demo
 
-A local browser demo runs the real matcher and shows the reference, unaligned,
-and aligned scans:
+The interactive browser demo is maintained separately in
+[csm-rs-demo](https://github.com/LotfiZ/csm-rs-demo) (currently private; repository
+access is required). It has its own dependencies and release cycle.
+
+For a runnable example included with this library:
 
 ```sh
-cargo run -p csm-rs-demo --release
+cargo run --example scan_matching
 ```
-
-Then open <http://127.0.0.1:7878>. See [demo/README.md](demo/README.md).
 
 ## Testing
 
