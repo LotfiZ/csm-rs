@@ -29,6 +29,10 @@
   reproducible capability suite, per-ray sigma/known-orientation inputs for the
   weighting paths, and a documented deviations summary
   ([#42](https://github.com/LotfiZ/csm-rs/issues/42)).
+- Add a separate local browser demo package (axum + Tokio) that ray-casts a
+  moving sensor and runs the real matcher, drawing reference, unaligned, and
+  aligned scans with true/estimated motion and termination diagnostics
+  ([#43](https://github.com/LotfiZ/csm-rs/issues/43)).
 - Documented the coordinate contract: metres, radians, scan ordering, sensor
   origin, and the sensor-to-reference transform composition.
 - Retained `PreparedPolarScan`/`PreparedMatcher` reusable storage and optional
