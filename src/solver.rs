@@ -4,9 +4,6 @@
 //! rotation `θ` minimizing Σ (R(θ)p + t − q)′ C (R(θ)p + t − q) over the
 //! valid correspondences, where `C` is the per-correspondence weight matrix.
 //! Closed form via 4×4 normal equations with 2×2 block inverses.
-//!
-//! Licensing note: the vendored solver is GPLv2+ while the rest of the library
-//! is LGPLv3, so the combined crate is distributed as GPL-2.0-or-later.
 
 use crate::math::{projection_on_segment, Mat2, Mat4};
 use crate::params::Params;
