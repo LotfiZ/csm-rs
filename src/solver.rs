@@ -31,17 +31,6 @@ pub(crate) struct GpcCorrespondence {
 /// Build GPC correspondences and solve for the next ICP pose.
 ///
 /// C: `compute_next_estimate()` in `sm/csm/icp/icp_loop.c`
-#[allow(dead_code)]
-pub(crate) fn compute_next_estimate(
-    params: &Params,
-    laser_ref: &LaserData,
-    laser_sens: &LaserData,
-    x_old: [f64; 3],
-) -> Option<[f64; 3]> {
-    let mut correspondences = Vec::new();
-    compute_next_estimate_with_scratch(params, laser_ref, laser_sens, x_old, &mut correspondences)
-}
-
 pub(crate) fn compute_next_estimate_with_scratch(
     params: &Params,
     laser_ref: &LaserData,

@@ -1,9 +1,4 @@
 //! Matching configuration, workspaces, and results.
-//!
-//! The supported interface is organized around four ideas: ordered scans
-//! ([`crate::PolarScan`], [`crate::CartesianScan`]), validated configuration
-//! ([`crate::Params`]), matching ([`Matcher`]), and results
-//! ([`MatchOutcome`]).
 
 use crate::{
     icp,

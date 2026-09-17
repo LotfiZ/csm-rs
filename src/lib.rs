@@ -66,25 +66,15 @@ mod correspondence;
 mod covariance;
 mod icp;
 mod laser_data;
+mod matching;
 mod math;
 mod params;
 mod pose;
 mod result;
+mod scan;
 mod solver;
 
-pub mod matching;
-pub mod scan;
-
-/// Validated matcher configuration.
-pub mod config {
-    pub use crate::params::{
-        CorrespondenceParams, CorrespondenceSearch, CorrectionLimits, DistanceMetric,
-        OutlierParams, Params, ParamsError, ReadingBounds, RestartParams, StoppingCriteria,
-        WeightParams,
-    };
-}
-
-pub use config::{
+pub use params::{
     CorrespondenceParams, CorrespondenceSearch, CorrectionLimits, DistanceMetric, OutlierParams,
     Params, ParamsError, ReadingBounds, RestartParams, StoppingCriteria, WeightParams,
 };
