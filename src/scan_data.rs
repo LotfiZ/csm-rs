@@ -471,7 +471,7 @@ impl ScanData {
     }
 
     /// Allocation-free [`Self::compute_orientation`] using caller-owned scratch.
-    pub fn compute_orientation_with_scratch(
+    pub(crate) fn compute_orientation_with_scratch(
         &mut self,
         size_neighbourhood: i32,
         sigma: f64,
