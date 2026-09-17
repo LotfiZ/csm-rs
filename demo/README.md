@@ -20,13 +20,11 @@ another interface or port:
 cargo run -p csm-rs-demo --release -- 0.0.0.0:8080
 ```
 
-## HTTP framework choice
+## HTTP framework
 
-The demo uses [axum](https://github.com/tokio-rs/axum) 0.8 on Tokio. axum is
-actively maintained, targets Linux ARM and x86, and has a small routing/serving
-surface that fits a local, single-process demo without a templating or asset
-pipeline. Its dependencies live only in this package; the `csm-rs` library
-itself has none.
+The demo uses [axum](https://github.com/tokio-rs/axum) 0.8 on Tokio: actively
+maintained, targets Linux ARM and x86, and small enough for a local,
+single-process demo. Its dependencies live only in this package.
 
 ## Reference policies and scenarios
 

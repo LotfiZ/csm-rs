@@ -20,12 +20,6 @@ Add the crate to a Cargo project:
 csm-rs = { git = "https://github.com/LotfiZ/csm-rs" }
 ```
 
-Then run the complete test suite from the repository root:
-
-```sh
-cargo test --all-targets --all-features
-```
-
 ## Scope
 
 Supported: the `sm_icp` path (ICP/PlICP with correspondence search, outlier
@@ -36,12 +30,6 @@ microcontroller or `no_std` targets. Port history and the pre-remaster
 numerical baseline are in [docs/contributing.md](docs/contributing.md).
 
 ## Quick start
-
-Install Rust, then run the complete test suite from the repository root:
-
-```sh
-cargo test --all-targets --all-features
-```
 
 The supported interface is arranged around scans, configuration, matching, and
 results. A minimal match borrows caller-owned buffers and uses an identity
@@ -97,7 +85,6 @@ use csm_rs::{Matcher, Params, PolarScan, Pose};
 let matcher = Matcher::new(Params::default())?;
 let guess = Pose::new(0.10, -0.05, 0.02);
 let outcome = matcher.match_polar_from(reference, sensor, guess)?;
-# Ok::<(), Box<dyn std::error::Error>>(())
 ```
 
 The reference scan is always chosen explicitly by the caller; the library
@@ -113,7 +100,6 @@ use csm_rs::{Matcher, Params};
 
 let params = Params { do_compute_covariance: true, ..Params::default() };
 let matcher = Matcher::new(params)?;
-# Ok::<(), Box<dyn std::error::Error>>(())
 ```
 
 `MatchOutcome::covariance_status` reports disabled, computed, or failed
@@ -134,12 +120,11 @@ are documented on [`MatchOutcome`] and [`PreparedMatcher`].
 For fixed-rate applications, build a `PreparedMatcher` once and update its
 frames in place:
 
-```text
+```rust,ignore
 let matcher = Matcher::default_pose_only();
 let mut workspace = matcher.prepare(reference, sensor)?;
 workspace.update_sensor(&next_readings, &next_valid)?;
 let estimate = workspace.match_once()?;
-# Ok::<(), csm_rs::ScanError>(())
 ```
 
 `Matcher::prepare_polar`, `Matcher::prepare_cartesian`, and `Matcher::prepare`
@@ -187,15 +172,8 @@ The example simulates a robot scanning a square room. It needs no input files,
 extra dependencies, or C installation. Change `FIRST_SENSOR_POSE` in
 `examples/scan_matching.rs` to try another small movement.
 
-The prepared benchmark reports both pose-only and uncertainty modes in release
-mode:
-
-```sh
-cargo run --release -p csm-rs --example benchmark_prepared
-```
-
-For a repeatable release resource report (optimized example sizes plus the
-prepared latency benchmark), run `scripts/measure-release.sh`.
+For a repeatable resource report (optimized example sizes plus the prepared
+latency benchmark), run `scripts/measure-release.sh`.
 
 ## Performance and measurements
 
@@ -210,10 +188,9 @@ The report measures preparation and matching separately, reports latency
 percentiles (including p99), counts steady-state heap allocations, reports
 memory and alignment quality, and records the seed, hardware, toolchain, build
 settings, revision, and commands. See [docs/measurements.md](docs/measurements.md)
-for the method, the latest recorded run, and the assessment against the
-provisional target. Physical validation on a Jetson AGX Xavier, the supported
-workloads, and the explicit list of unverified hardware are recorded in
-[docs/hardware.md](docs/hardware.md). No claim of outperforming the C
+for the method, the latest recorded run, the validated Jetson AGX Xavier
+hardware, the workloads it supports, the unverified targets, and the assessment
+against the provisional p99 target. No claim of outperforming the C
 implementation is made without comparable measurements.
 
 ## Capability coverage
@@ -249,12 +226,10 @@ requiring exact C agreement everywhere. Known deviations are:
   and degenerate geometry rather than against the C source alone. No claim of
   outperforming C is made without comparable measurements.
 
-Regenerate the corpus with the C reference source checked out at
-`/home/agx/workspace/csm-src`:
+Regenerate the corpus with the C reference source checked out at `../csm`:
 
 ```sh
-./fixture-generator/build.sh /home/agx/workspace/csm-src \
-  tests/fixtures/identity.json
+./fixture-generator/build.sh /path/to/csm tests/fixtures/identity.json
 ```
 
 ## Workspace layout
@@ -265,9 +240,7 @@ Regenerate the corpus with the C reference source checked out at
 - `demo/` — local browser demonstration (axum + Tokio, dependencies isolated)
 - `fixture-generator/` — C tool producing the reference fixtures
 - `docs/contributing.md` — contributor commands and numerical baseline
-- `docs/measurements.md` — reproducible resource measurements
-- `docs/hardware.md` — physical-device validation evidence
-- `docs/release-readiness.md` — release-criteria verification
+- `docs/measurements.md` — resource measurements and hardware validation
 
 Launch the demo with `cargo run -p csm-rs-demo --release`; see `demo/README.md`.
 

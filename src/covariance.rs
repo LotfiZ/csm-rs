@@ -21,51 +21,6 @@ pub(crate) struct ExactCovariance {
     pub fisher: Mat3,
 }
 
-/// Compute the Fisher information matrix for one scan.
-///
-/// The matrix is expressed in robot coordinates and uses `true_alpha` only;
-/// rays with a NaN `true_alpha` are skipped, matching CSM's
-/// `ld_fisher0()`. This helper is public because it is useful to callers that
-/// want the scan-only information matrix alongside ICP's matching covariance.
-///
-/// C: `sm/csm/laser_data_fisher.c:ld_fisher0()`
-#[allow(dead_code)] // Exposed by the optional-uncertainty public API (see epic #35).
-pub fn fisher0(laser: &LaserData) -> Mat3 {
-    let mut fim = [[0.0; 3]; 3];
-    for i in 0..laser.nrays {
-        let alpha = laser.true_alpha[i];
-        if alpha.is_nan() {
-            continue;
-        }
-
-        let theta = laser.theta[i];
-        let beta = alpha - theta;
-        let reading = laser.readings[i];
-        let c = alpha.cos();
-        let s = alpha.sin();
-        let z = 1.0 / beta.cos();
-        let tangent = beta.tan();
-
-        let values = [
-            c * c * z * z,
-            c * s * z * z,
-            c * z * tangent * reading,
-            c * s * z * z,
-            s * s * z * z,
-            s * z * tangent * reading,
-            c * z * tangent * reading,
-            s * z * tangent * reading,
-            tangent * reading * tangent * reading,
-        ];
-        for row in 0..3 {
-            for col in 0..3 {
-                fim[row][col] += values[row * 3 + col];
-            }
-        }
-    }
-    Mat3::new(fim)
-}
-
 /// Compute CSM's exact closed-form covariance before the final `sigma²`
 /// scaling.
 ///
@@ -276,47 +231,6 @@ fn negative_left_multiply_in_place(left: &Mat3, matrix: &mut Matrix) {
                 + left.data[row][1] * v[1]
                 + left.data[row][2] * v[2]);
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn fisher0_matches_one_ray_information_contribution() {
-        let mut laser = LaserData::new(10, -1.0, 1.0);
-        laser.theta[0] = 0.1;
-        laser.readings[0] = 2.0;
-        laser.true_alpha[0] = 0.4;
-
-        let beta: f64 = 0.3;
-        let c = 0.4f64.cos();
-        let s = 0.4f64.sin();
-        let z = 1.0 / beta.cos();
-        let tangent = beta.tan();
-        let expected = [
-            [c * c * z * z, c * s * z * z, c * z * tangent * 2.0],
-            [c * s * z * z, s * s * z * z, s * z * tangent * 2.0],
-            [
-                c * z * tangent * 2.0,
-                s * z * tangent * 2.0,
-                tangent * 2.0 * tangent * 2.0,
-            ],
-        ];
-        let actual = fisher0(&laser);
-        for (row, values) in expected.iter().enumerate() {
-            for (col, expected) in values.iter().enumerate() {
-                assert!((actual.data[row][col] - expected).abs() < 1e-15);
-            }
-        }
-    }
-
-    #[test]
-    fn fisher0_skips_rays_without_true_alpha() {
-        let mut laser = LaserData::new(10, -1.0, 1.0);
-        laser.readings[0] = 2.0;
-        assert_eq!(fisher0(&laser), Mat3::new([[0.0; 3]; 3]));
     }
 }
 
