@@ -7,11 +7,11 @@
 //! Solves the general point-correspondence problem: find translation `t` and
 //! rotation `θ` minimizing Σ (R(θ)p + t − q)′ C (R(θ)p + t − q) over the
 //! valid correspondences. Closed form via 4×4 normal equations with 2×2
-//! block inverses — hand-rolled small matrices per grilling Q3.
+//! block inverses, using small hand-rolled matrices.
 //!
 //! Note: upstream `gpc.c` is GPLv2+ (the rest of CSM is LGPLv3); this module
 //! is the GPL contaminant and the candidate for a future clean-room rewrite
-//! if copyleft ever blocks a use case (grilling Q13).
+//! if copyleft ever blocks a use case.
 
 use crate::laser_data::{CorrespondenceType, LaserData};
 use crate::math::{projection_on_segment, Mat2, Mat4};

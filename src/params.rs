@@ -1,11 +1,11 @@
-//! Match parameters: fully idiomatic config surface (grilling Q7).
+//! Match parameters: the validation configuration surface.
 //!
 //! C: `struct sm_params` in `sm/csm/algos.h`; defaults in `sm/csm/sm_options.c`
 //!
 //! Every field documents its C counterpart. Grouped into sub-structs with
 //! `Default` impls transcribed from `sm_options.c`. Strategy enums replace
 //! C's boolean flags; phase-2 enhancements arrive as new enum variants
-//! (grilling Q15).
+//!
 
 /// Correspondence search strategy.
 ///

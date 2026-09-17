@@ -53,6 +53,14 @@
 - Add reproducible latency (including p99), allocation, memory, alignment, and
   build-size measurements with recorded workloads, environment, and commands
   ([#48](https://github.com/LotfiZ/csm-rs/issues/48)).
+- Validate the library on physical Jetson AGX Xavier hardware, recording
+  correctness and performance evidence, assessing the provisional p99 target,
+  and disclosing unverified targets
+  ([#49](https://github.com/LotfiZ/csm-rs/issues/49)).
+- Verify release documentation, distribution obligations, package contents,
+  runnable examples, dependency separation, and the complete browser workflow,
+  and assess every epic release criterion in docs/release-readiness.md
+  ([#50](https://github.com/LotfiZ/csm-rs/issues/50)).
 - Documented the coordinate contract: metres, radians, scan ordering, sensor
   origin, and the sensor-to-reference transform composition.
 - Retained `PreparedPolarScan`/`PreparedMatcher` reusable storage and optional

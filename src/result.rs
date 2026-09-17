@@ -2,7 +2,7 @@
 //!
 //! C: `struct sm_result` in `sm/csm/algos.h`
 //!
-//! A failed match is a *result*, not an error (grilling Q9): check
+//! A failed match is a *result*, not an error: check
 //! [`SmResult::valid`]. `Result` is reserved for malformed input.
 
 use crate::math::{Mat3, Matrix};

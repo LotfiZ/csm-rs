@@ -1,39 +1,39 @@
 # csm-rs
 
-Rust port of the **Canonical Scan Matcher** ([Andrea Censi's CSM](https://github.com/AndreaCensi/csm)):
-point-to-line ICP with smart correspondence search, outlier rejection, and a
-closed-form estimate of the matching covariance
+A Rust implementation of the **Canonical Scan Matcher** ([Andrea Censi's CSM](https://github.com/AndreaCensi/csm)):
+point-to-line ICP with smart correspondence search, outlier rejection, restart
+handling, and an optional closed-form estimate of the matching covariance
 ([Censi, ICRA 2007](https://purl.org/censi/2007/icpcov)).
 
-## Status
+The library has no runtime dependencies and is organized around ordered scans,
+validated configuration, matching, and results. It supports ordered polar and
+Cartesian inputs, explicit initial poses, reusable allocation-free workspaces,
+optional covariance/derivative/Fisher-information outputs, and explicit
+termination reasons.
 
-Port scope is the `sm_icp` path only (ICP/PlICP + covariance); GPM/HSM/MbICP,
-Cairo drawing, and the CLI apps are intentionally excluded.
+## Installation
 
-Design decisions were captured in a structured grilling session — see module
-docs for the C cross-references and per-decision rationale.
+Add the crate to a Cargo project:
 
-## Validation strategy
+```toml
+[dependencies]
+csm-rs = { git = "https://github.com/LotfiZ/csm-rs" }
+```
 
-The port is validated *golden-master* against the original C library:
-a throwaway C generator (in `fixture-generator/`, never built by cargo) links
-the reference implementation and emits JSON fixtures (scan pairs + params +
-expected results) checked into `tests/fixtures/`. The 16-case
-corpus covers the synthetic baseline, covariance, trimming, duplicate,
-restart, oscillation, feature, and weighting paths, plus the upstream
-`misc/tests` logs, a three-point collinear degenerate geometry case, and an
-explicit max-iteration exhaustion case. The public tracer path checks pose to
-1e-9, `iterations`/`nvalid` exactly, and the configured first-iteration
-correspondence hash exactly. The crate-internal seam checks that tricks and
-naive correspondence search produce the same keys and hash on the synthetic
-common path. Alpha-enabled fixtures validate the configured C path; CSM's
-smart routine intentionally omits the optional alpha filter. The imported
-`stallo2` log records another known C behavior: CSM's smart and naive searches
-diverge on that scan's invalid sectors, so the Rust port keeps and tests each
-C path instead of hiding the divergence. The covariance fixture checks the
-closed-form result and its derivative matrices to 1e-6 relative error. Match
-errors use 1e-9 for synthetic cases and 2e-9 for imported logs to account for
-their different native math paths.
+Then run the complete test suite from the repository root:
+
+```sh
+cargo test --all-targets --all-features
+```
+
+## Scope
+
+Supported: the `sm_icp` path (ICP/PlICP with correspondence search, outlier
+rejection, orientation/visibility handling, weighting, restart, covariance,
+and Fisher information). Not supported: GPM/HSM/MbICP, Cairo drawing, the CLI
+apps, arbitrary unordered point clouds, public hosting/WebAssembly, and
+microcontroller or `no_std` targets. Port history and the pre-remaster
+numerical baseline are in [docs/contributing.md](docs/contributing.md).
 
 ## Quick start
 
@@ -211,8 +211,10 @@ percentiles (including p99), counts steady-state heap allocations, reports
 memory and alignment quality, and records the seed, hardware, toolchain, build
 settings, revision, and commands. See [docs/measurements.md](docs/measurements.md)
 for the method, the latest recorded run, and the assessment against the
-provisional target. No claim of outperforming the C implementation is made
-without comparable measurements.
+provisional target. Physical validation on a Jetson AGX Xavier, the supported
+workloads, and the explicit list of unverified hardware are recorded in
+[docs/hardware.md](docs/hardware.md). No claim of outperforming the C
+implementation is made without comparable measurements.
 
 ## Capability coverage
 
@@ -263,6 +265,9 @@ Regenerate the corpus with the C reference source checked out at
 - `demo/` — local browser demonstration (axum + Tokio, dependencies isolated)
 - `fixture-generator/` — C tool producing the reference fixtures
 - `docs/contributing.md` — contributor commands and numerical baseline
+- `docs/measurements.md` — reproducible resource measurements
+- `docs/hardware.md` — physical-device validation evidence
+- `docs/release-readiness.md` — release-criteria verification
 
 Launch the demo with `cargo run -p csm-rs-demo --release`; see `demo/README.md`.
 
