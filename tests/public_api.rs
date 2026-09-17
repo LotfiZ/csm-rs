@@ -2,8 +2,8 @@
 //! surface.
 
 use csm_rs::{
-    CartesianScan, CovarianceStatus, MatchStatus, Matcher, Params, PolarScan, Pose, PreparedMatcher,
-    PreparedPolarScan, TerminationReason,
+    CartesianScan, CovarianceStatus, MatchStatus, Matcher, Params, PolarScan, Pose,
+    PreparedMatcher, PreparedPolarScan, TerminationReason,
 };
 
 fn polar(n: usize, phase: f64) -> (Vec<f64>, Vec<f64>, Vec<bool>) {
@@ -205,14 +205,18 @@ fn prepared_scans_can_be_reused_without_reallocation_of_shape() {
         PreparedPolarScan::from_polar(angles.clone(), readings.clone(), valid.clone()).unwrap();
     let mut sensor = PreparedPolarScan::from_polar(angles, readings, valid).unwrap();
     let matcher = Matcher::new(Params::default()).unwrap();
-    assert!(matcher
-        .match_prepared(&mut reference, &mut sensor)
-        .unwrap()
-        .valid);
-    assert!(matcher
-        .match_prepared(&mut reference, &mut sensor)
-        .unwrap()
-        .valid);
+    assert!(
+        matcher
+            .match_prepared(&mut reference, &mut sensor)
+            .unwrap()
+            .valid
+    );
+    assert!(
+        matcher
+            .match_prepared(&mut reference, &mut sensor)
+            .unwrap()
+            .valid
+    );
 }
 
 #[test]
@@ -353,7 +357,12 @@ fn cartesian_recovers_the_same_known_rotation_as_polar() {
 
     assert!(by_polar.valid && by_cartesian.valid);
     assert!((by_cartesian.pose.theta - phi).abs() < 1e-3);
-    for (p, c) in by_polar.pose.to_array().iter().zip(by_cartesian.pose.to_array()) {
+    for (p, c) in by_polar
+        .pose
+        .to_array()
+        .iter()
+        .zip(by_cartesian.pose.to_array())
+    {
         assert!((p - c).abs() < 1e-6, "polar vs cartesian: {p} != {c}");
     }
 }
@@ -552,9 +561,7 @@ fn capacity_growth_is_explicit_and_reusable() {
     workspace.reserve(1024, 1024);
     assert!(workspace.capacities().0 >= 1024);
 
-    let big_angles: Vec<f64> = (0..900)
-        .map(|i| -1.0 + 2.0 * i as f64 / 899.0)
-        .collect();
+    let big_angles: Vec<f64> = (0..900).map(|i| -1.0 + 2.0 * i as f64 / 899.0).collect();
     let big_readings = vec![8.0; 900];
     let big_valid = vec![true; 900];
     workspace
@@ -580,18 +587,10 @@ fn prepared_matching_supports_large_and_independently_sized_scans() {
     let small_angles: Vec<f64> = (0..200).map(|i| -1.0 + 2.0 * i as f64 / 199.0).collect();
     let big_readings = vec![8.0; big_angles.len()];
     let small_readings = vec![8.0; small_angles.len()];
-    let reference = PreparedPolarScan::from_polar(
-        big_angles,
-        big_readings,
-        vec![true; 3_500],
-    )
-    .unwrap();
-    let sensor = PreparedPolarScan::from_polar(
-        small_angles,
-        small_readings,
-        vec![true; 200],
-    )
-    .unwrap();
+    let reference =
+        PreparedPolarScan::from_polar(big_angles, big_readings, vec![true; 3_500]).unwrap();
+    let sensor =
+        PreparedPolarScan::from_polar(small_angles, small_readings, vec![true; 200]).unwrap();
     let mut workspace = Matcher::default_pose_only()
         .prepare(reference, sensor)
         .unwrap();

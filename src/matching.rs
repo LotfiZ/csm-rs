@@ -2,18 +2,18 @@
 
 use crate::{
     icp,
-    laser_data::{LaserData, ScanError},
     math::{Mat3, Matrix},
     params::{Params, ParamsError},
     pose::Pose,
-    result::SmResult,
+    result::MatchResult,
     scan::{CartesianScan, PolarScan},
+    scan_data::{ScanData, ScanError},
 };
 
 /// Owned, reusable polar scan storage for steady-state matching.
 #[derive(Clone, Debug)]
 pub struct PreparedPolarScan {
-    data: LaserData,
+    data: ScanData,
     /// The caller's validity flags. Matching temporarily invalidates rays
     /// (reading bounds, visibility), so the input is restored before every
     /// match to avoid stale state across frames.
@@ -26,7 +26,7 @@ impl PreparedPolarScan {
         readings: Vec<f64>,
         valid: Vec<bool>,
     ) -> Result<Self, ScanError> {
-        let data = LaserData::from_polar(angles, readings, valid.clone())?;
+        let data = ScanData::from_polar(angles, readings, valid.clone())?;
         Ok(Self {
             data,
             input_valid: valid,
@@ -87,7 +87,7 @@ impl PreparedPolarScan {
     /// further allocation.
     pub fn with_capacity(capacity: usize) -> Self {
         Self {
-            data: LaserData::with_capacity(capacity),
+            data: ScanData::with_capacity(capacity),
             input_valid: Vec::with_capacity(capacity),
         }
     }
@@ -154,11 +154,7 @@ impl PreparedPolarScan {
     }
 
     /// Replace the scan with ordered Cartesian points.
-    pub fn set_cartesian(
-        &mut self,
-        points: &[[f64; 2]],
-        valid: &[bool],
-    ) -> Result<(), ScanError> {
+    pub fn set_cartesian(&mut self, points: &[[f64; 2]], valid: &[bool]) -> Result<(), ScanError> {
         let scan = CartesianScan::new(points, valid)?;
         let (angles, readings) = scan.to_polar_parts();
         self.set_polar(&angles, &readings, valid)
@@ -211,7 +207,8 @@ impl PreparedPolarScan {
     }
 
     /// Refresh readings in place while retaining all allocated storage.
-    pub fn update(&mut self, readings: &[f64], valid: &[bool]) -> Result<(), ScanError> {        if readings.len() != self.data.nrays {
+    pub fn update(&mut self, readings: &[f64], valid: &[bool]) -> Result<(), ScanError> {
+        if readings.len() != self.data.nrays {
             if readings.len() > self.data.nrays {
                 return Err(ScanError::CapacityExceeded {
                     capacity: self.data.nrays,
@@ -432,8 +429,8 @@ impl PreparedMatcher {
     ) -> Result<(), ScanError> {
         self.reference.prepare_for_match();
         self.sensor.prepare_for_match();
-        let mut result = SmResult::default();
-        let termination = icp::sm_icp_with_scratch(
+        let mut result = MatchResult::default();
+        let termination = icp::run_icp_with_scratch(
             &self.matcher.params,
             guess.to_array(),
             &mut self.reference.data,
@@ -444,8 +441,7 @@ impl PreparedMatcher {
         let params = &self.matcher.params;
         let covariance = self.scratch.covariance;
         let fisher = self.scratch.fisher;
-        let mut filled = MatchOutcome::from(result)
-            .with_termination(termination);
+        let mut filled = MatchOutcome::from(result).with_termination(termination);
         filled.covariance = covariance;
         filled.fisher_information = fisher;
         filled.covariance_status = if !params.do_compute_covariance {
@@ -671,8 +667,8 @@ impl MatchOutcome {
     }
 }
 
-impl From<SmResult> for MatchOutcome {
-    fn from(result: SmResult) -> Self {
+impl From<MatchResult> for MatchOutcome {
+    fn from(result: MatchResult) -> Self {
         Self {
             status: if result.valid {
                 MatchStatus::Converged
@@ -789,13 +785,13 @@ impl Matcher {
         let reference_alpha = reference.true_alpha();
         let sensor_sigma = sensor.sigma();
         let sensor_alpha = sensor.true_alpha();
-        let mut laser_ref = LaserData::from_polar(
+        let mut laser_ref = ScanData::from_polar(
             reference.angles().to_vec(),
             reference.readings().to_vec(),
             reference.valid().to_vec(),
         )?;
         apply_weight_inputs(&mut laser_ref, reference_sigma, reference_alpha);
-        let mut laser_sens = LaserData::from_polar(
+        let mut laser_sens = ScanData::from_polar(
             sensor.angles().to_vec(),
             sensor.readings().to_vec(),
             sensor.valid().to_vec(),
@@ -849,15 +845,15 @@ impl Matcher {
 
     fn match_laser(
         &self,
-        reference: &mut LaserData,
-        sensor: &mut LaserData,
+        reference: &mut ScanData,
+        sensor: &mut ScanData,
         guess: Pose,
     ) -> Result<MatchOutcome, ScanError> {
         if !guess.is_finite() {
             return Err(ScanError::NonFiniteGuess);
         }
-        let mut result = SmResult::default();
-        let termination = icp::sm_icp(
+        let mut result = MatchResult::default();
+        let termination = icp::run_icp(
             &self.params,
             guess.to_array(),
             reference,
@@ -871,7 +867,7 @@ impl Matcher {
 }
 
 /// Copy optional weighting inputs onto a scan.
-fn apply_weight_inputs(scan: &mut LaserData, sigma: Option<&[f64]>, true_alpha: Option<&[f64]>) {
+fn apply_weight_inputs(scan: &mut ScanData, sigma: Option<&[f64]>, true_alpha: Option<&[f64]>) {
     if let Some(sigma) = sigma {
         if sigma.len() == scan.nrays {
             scan.readings_sigma.copy_from_slice(sigma);
@@ -887,9 +883,9 @@ fn apply_weight_inputs(scan: &mut LaserData, sigma: Option<&[f64]>, true_alpha: 
 /// Convert Cartesian input to the engine's polar representation.
 ///
 /// Explicit bearings are preserved; otherwise the bearing is `atan2(y, x)`.
-fn cartesian_to_laser(scan: CartesianScan<'_>) -> Result<LaserData, ScanError> {
+fn cartesian_to_laser(scan: CartesianScan<'_>) -> Result<ScanData, ScanError> {
     let (angles, readings) = scan.to_polar_parts();
-    LaserData::from_polar(angles, readings, scan.valid().to_vec())
+    ScanData::from_polar(angles, readings, scan.valid().to_vec())
 }
 
 /// Copy `source` into a reusable matrix slot, allocating only when the slot

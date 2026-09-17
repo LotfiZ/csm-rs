@@ -1,36 +1,32 @@
 //! The ICP loop: iteration and convergence.
 //!
-//! C: `sm/csm/icp/icp.c` (`sm_icp`),
-//!     `sm/csm/icp/icp_loop.c` (`icp_loop`, `termination_criterion`)
-//!
 //! The loop transforms the sensor scan, finds correspondences with the
 //! selected strategy, rejects outliers, solves the closed-form PlICP update,
 //! and stops when the pose correction is below both configured thresholds.
 //! Correspondence-hash oscillation detection and the six-perturbation restart
-//! shell follow the C control flow. Optional Censi covariance is evaluated
-//! after the final correspondence set has been selected.
+//! shell run before the optional Censi covariance is evaluated on the final
+//! correspondence set.
 
 use crate::correspondence::{
     find_correspondences, kill_outliers_double_with_scratch, kill_outliers_trim_with_scratch,
 };
 use crate::covariance::compute_covariance_exact_into;
-use crate::laser_data::{LaserData, OrientationScratch, ScanError};
 use crate::matching::TerminationReason;
 use crate::math::{corr_hash_iter, ominus, pose_diff, Mat3, Matrix};
 use crate::params::DistanceMetric;
 use crate::params::Params;
-use crate::result::SmResult;
-use crate::solver::{compute_next_estimate_with_scratch, GpcCorrespondence};
+use crate::result::MatchResult;
+use crate::scan_data::{OrientationScratch, ScanData, ScanError};
+use crate::solver::{compute_next_estimate_with_scratch, PointCorrespondence};
 
-/// Run point-to-line ICP through the CSM shell.
+/// Run point-to-line ICP.
 ///
-/// C: `sm/csm/icp/icp.c:sm_icp()`
-pub(crate) fn sm_icp(
+pub(crate) fn run_icp(
     params: &Params,
     guess: [f64; 3],
-    laser_ref: &mut LaserData,
-    laser_sens: &mut LaserData,
-    result: &mut SmResult,
+    laser_ref: &mut ScanData,
+    laser_sens: &mut ScanData,
+    result: &mut MatchResult,
 ) -> Result<TerminationReason, ScanError> {
     let mut scratch = IcpScratch::new(
         laser_ref.nrays,
@@ -39,7 +35,7 @@ pub(crate) fn sm_icp(
         params.correspondence.orientation_neighbourhood,
     );
     let termination =
-        sm_icp_with_scratch(params, guess, laser_ref, laser_sens, result, &mut scratch)?;
+        run_icp_with_scratch(params, guess, laser_ref, laser_sens, result, &mut scratch)?;
     // The convenience path owns its result, so copy the reusable derivative
     // buffers out before the scratch is dropped.
     if scratch.covariance.is_some() {
@@ -50,25 +46,22 @@ pub(crate) fn sm_icp(
     Ok(termination)
 }
 
-pub(crate) fn sm_icp_with_scratch(
+pub(crate) fn run_icp_with_scratch(
     params: &Params,
     guess: [f64; 3],
-    laser_ref: &mut LaserData,
-    laser_sens: &mut LaserData,
-    result: &mut SmResult,
+    laser_ref: &mut ScanData,
+    laser_sens: &mut ScanData,
+    result: &mut MatchResult,
     scratch: &mut IcpScratch,
 ) -> Result<TerminationReason, ScanError> {
-    *result = SmResult::default();
+    *result = MatchResult::default();
 
-    // C: `ld_valid_fields()` is checked before any input mutation.
     laser_ref.validate()?;
     laser_sens.validate()?;
 
-    // C: `ld_invalid_if_outside()` in `icp.c`.
     laser_ref.invalid_if_outside(params.reading_bounds.min, params.reading_bounds.max);
     laser_sens.invalid_if_outside(params.reading_bounds.min, params.reading_bounds.max);
 
-    // C: `ld_create_jump_tables()` in `icp.c`. The table is needed by the
     // tricks search and is also built for the debug equivalence check.
     if matches!(
         params.correspondence.search,
@@ -81,8 +74,8 @@ pub(crate) fn sm_icp_with_scratch(
     laser_ref.compute_cartesian();
     laser_sens.compute_cartesian();
 
-    // C computes alpha before visibility invalidates rays. Keep that order so
-    // the derived fields on surviving rays have the same values as CSM.
+    // Compute alpha before visibility invalidates rays. Keep that order so
+    // the derived fields on surviving rays stay consistent.
     if params.correspondence.do_alpha_test {
         laser_ref.simple_clustering(params.correspondence.clustering_threshold);
         laser_ref.compute_orientation_with_scratch(
@@ -99,7 +92,6 @@ pub(crate) fn sm_icp_with_scratch(
     }
 
     if params.correspondence.do_visibility_test {
-        // C: `visibilityTest(laser_ref, x_old)` and
         // `visibilityTest(laser_sens, ominus(x_old))` in `icp.c`.
         laser_ref.visibility_test_with_scratch(&guess, &mut scratch.visibility_thetas);
         let sensor_viewpoint = ominus(guess);
@@ -157,7 +149,7 @@ pub(crate) struct IcpScratch {
     nearest_distances: Vec<f64>,
     distances_by_sensor: Vec<f64>,
     distances: Vec<f64>,
-    correspondences: Vec<GpcCorrespondence>,
+    correspondences: Vec<PointCorrespondence>,
     visibility_thetas: Vec<f64>,
     orientation: OrientationScratch,
     /// Reusable derivative-matrix storage for the optional covariance path.
@@ -221,19 +213,18 @@ impl IcpScratch {
             + self.nearest_distances.capacity() * std::mem::size_of::<f64>()
             + self.distances_by_sensor.capacity() * std::mem::size_of::<f64>()
             + self.distances.capacity() * std::mem::size_of::<f64>()
-            + self.correspondences.capacity() * std::mem::size_of::<GpcCorrespondence>()
+            + self.correspondences.capacity() * std::mem::size_of::<PointCorrespondence>()
     }
 }
 
-/// Run ICP once, then try CSM's six local perturbations when the mean error is
+/// Run ICP once, then try six local perturbations when the mean error is
 /// above the configured restart threshold.
 ///
-/// C: `sm/csm/icp/icp.c:sm_icp()`
 fn icp_loop_with_restart(
     params: &Params,
     guess: [f64; 3],
-    laser_ref: &LaserData,
-    laser_sens: &mut LaserData,
+    laser_ref: &ScanData,
+    laser_sens: &mut ScanData,
     scratch: &mut IcpScratch,
 ) -> IcpOutcome {
     let initial = icp_loop(params, guess, laser_ref, laser_sens, scratch, false);
@@ -255,7 +246,7 @@ fn icp_loop_with_restart(
             ];
             let candidate = icp_loop(params, start, laser_ref, laser_sens, scratch, true);
             if !candidate.success {
-                // C stops trying perturbations after the first failed restart,
+                // Stop trying perturbations after the first failed restart,
                 // but still returns the best successful result so far.
                 break;
             }
@@ -266,22 +257,21 @@ fn icp_loop_with_restart(
             }
         }
 
-        // C recomputes the public correspondence state after any restart,
+        // Recompute the public correspondence state after any restart,
         // using the pose selected by the total-error comparison.
         laser_sens.compute_world_coords(&best.x);
         find_correspondences(params, laser_ref, laser_sens);
     }
 
     best.iterations = iterations;
-    // C keeps the correspondence count from the initial loop even if a
+    // Keep the correspondence count from the initial loop even if a
     // restart has a different surviving set.
     best.nvalid = initial.nvalid;
     best
 }
 
-/// The six restart offsets used by CSM: ±x, ±y, and ±theta.
+/// The six restart offsets: ±x, ±y, and ±theta.
 ///
-/// C: `perturb[6][3]` in `sm/csm/icp/icp.c`
 fn restart_perturbations(params: &Params) -> [[f64; 3]; 6] {
     let dt = params.restart.dt;
     let dtheta = params.restart.dtheta;
@@ -297,12 +287,11 @@ fn restart_perturbations(params: &Params) -> [[f64; 3]; 6] {
 
 /// Perform one convergence/oscillation-aware ICP loop.
 ///
-/// C: `sm/csm/icp/icp_loop.c:icp_loop()`
 fn icp_loop(
     params: &Params,
     initial_guess: [f64; 3],
-    laser_ref: &LaserData,
-    laser_sens: &mut LaserData,
+    laser_ref: &ScanData,
+    laser_sens: &mut ScanData,
     scratch: &mut IcpScratch,
     restart: bool,
 ) -> IcpOutcome {
@@ -329,7 +318,6 @@ fn icp_loop(
     scratch.hashes.clear();
     scratch.distances.clear();
     for iteration in 0..max_iterations {
-        // C: `ld_compute_world_coords(laser_sens, x_old)`.
         laser_sens.compute_world_coords(&x_old);
         find_correspondences(params, laser_ref, laser_sens);
 
@@ -349,8 +337,6 @@ fn icp_loop(
             };
         }
 
-        // C: `kill_outliers_double()` followed by `kill_outliers_trim()` in
-        // `sm/csm/icp/icp_loop.c`.
         if params.outliers.remove_doubles {
             kill_outliers_double_with_scratch(
                 laser_ref,
@@ -437,10 +423,10 @@ fn icp_loop(
         }
         let delta = pose_diff(x_new, x_old);
 
-        // C records the post-trim correspondence set and stops PlICP as soon
+        // Record the post-trim correspondence set and stop PlICP as soon
         // as that set has appeared in an earlier iteration. Return the best
         // pose/error seen before the cycle, as required by the public ICP
-        // contract. With C's unweighted solver, the repeated hash normally
+        // contract. With the unweighted solver, the repeated hash normally
         // produces the same pose as the preceding occurrence.
         let correspondence_keys = laser_sens
             .corr
@@ -474,7 +460,7 @@ fn icp_loop(
         x_old = x_new;
     }
 
-    // C stores `iteration + 1` after the for-loop, so exhausting N iterations
+    // Store `iteration + 1` after the loop, so exhausting N iterations
     // reports N+1. Preserve that observable result for the conformance path.
     IcpOutcome {
         success: max_iterations > 0,
@@ -488,7 +474,6 @@ fn icp_loop(
 
 /// Check the two configured pose-delta thresholds.
 ///
-/// C: `termination_criterion()` in `sm/csm/icp/icp_loop.c`
 fn termination_criterion(params: &Params, delta: [f64; 3]) -> bool {
     let norm = (delta[0] * delta[0] + delta[1] * delta[1] + delta[2] * delta[2]).sqrt();
     norm < params.stopping.epsilon_xy && delta[2].abs() < params.stopping.epsilon_theta
@@ -498,14 +483,14 @@ fn termination_criterion(params: &Params, delta: [f64; 3]) -> bool {
 mod termination_tests {
     use super::*;
     use crate::params::Params;
-    use crate::result::SmResult;
+    use crate::result::MatchResult;
 
-    fn polar_scan(n: usize, readings: impl Fn(usize) -> f64) -> LaserData {
+    fn polar_scan(n: usize, readings: impl Fn(usize) -> f64) -> ScanData {
         let theta: Vec<f64> = (0..n)
             .map(|i| -0.2 + 0.4 * i as f64 / (n - 1) as f64)
             .collect();
         let readings: Vec<f64> = (0..n).map(&readings).collect();
-        LaserData::from_polar(theta, readings, vec![true; n]).unwrap()
+        ScanData::from_polar(theta, readings, vec![true; n]).unwrap()
     }
 
     #[test]
@@ -516,18 +501,11 @@ mod termination_tests {
         let mut sensor = polar_scan(100, |i| if i < 4 { 5.0 } else { 50.0 });
         let mut params = Params::default();
         params.correspondence.max_dist = 1.0;
-        let mut result = SmResult::default();
-        let termination = sm_icp(
-            &params,
-            [0.0; 3],
-            &mut reference,
-            &mut sensor,
-            &mut result,
-        )
-        .unwrap();
+        let mut result = MatchResult::default();
+        let termination =
+            run_icp(&params, [0.0; 3], &mut reference, &mut sensor, &mut result).unwrap();
         assert_eq!(termination, TerminationReason::InsufficientGeometry);
         assert!(!result.valid);
         assert!(result.nvalid > 0, "candidate diagnostics are preserved");
     }
-
 }

@@ -1,47 +1,37 @@
 //! Laser scan data structure and derived quantities.
 //!
-//! C: `sm/csm/laser_data.h`, `sm/csm/laser_data.c`, `sm/csm/laser_data_inline.h`,
-//!     `sm/csm/laser_data_bbox.c`, `sm/csm/clustering.c`, `sm/csm/orientation.c`,
-//!     visibility in `sm/csm/icp/icp_outliers.c`,
-//!     jump tables in `sm/csm/icp/icp_corr_tricks.c:ld_create_jump_tables()`
-//!
-//! Ports: polar→cartesian conversion, world-coordinate transform, jump tables
-//! for the smart correspondence search, simple clustering, orientation
-//! estimation, and the per-ray validity model (`valid` flags + NaN readings,
-//! kept C-faithful).
+//! Polar→cartesian conversion, world-coordinate transform, jump tables for
+//! the smart correspondence search, clustering, orientation estimation, and
+//! the per-ray validity model (`valid` flags plus NaN readings).
 
 /// A single 2D point with its polar representation.
 ///
-/// C: `struct point2d` in `laser_data.h`
 #[derive(Clone, Copy, Debug, Default)]
-pub struct Point2d {
-    /// Cartesian coordinates `(x, y)`. C: `point2d.p[2]`
+pub struct Point {
+    /// Cartesian coordinates `(x, y)`.
     pub p: [f64; 2],
-    /// Range from the origin. C: `point2d.rho`
+    /// Range from the origin.
     pub rho: f64,
-    /// Bearing from the origin. C: `point2d.phi`
+    /// Bearing from the origin.
     pub phi: f64,
 }
 
 /// One correspondence between a ray of the sensor scan and the reference scan.
 ///
-/// C: `struct correspondence` in `laser_data.h`
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Correspondence {
     /// Whether this correspondence survived the current filtering pass.
-    /// C: `correspondence.valid`
     pub valid: bool,
-    /// Closest point in the other scan (-1 when unset). C: `correspondence.j1`
+    /// Closest point in the other scan (-1 when unset).
     pub j1: i32,
-    /// Second closest point in the other scan (-1 when unset). C: `correspondence.j2`
+    /// Second closest point in the other scan (-1 when unset).
     pub j2: i32,
-    /// Point-to-point or point-to-line. C: `correspondence.type`
+    /// Point-to-point or point-to-line.
     pub corr_type: CorrespondenceType,
-    /// Squared distance from p(i) to point j1. C: `correspondence.dist2_j1`
+    /// Squared distance from p(i) to point j1.
     pub dist2_j1: f64,
 }
 
-/// C: `enum { corr_pp, corr_pl }` in `laser_data.h`
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum CorrespondenceType {
     #[default]
@@ -50,7 +40,6 @@ pub enum CorrespondenceType {
 }
 
 impl Default for Correspondence {
-    /// C: `ld_alloc()` initializes `valid=0, j1=-1, j2=-1`.
     fn default() -> Self {
         Self {
             valid: false,
@@ -64,69 +53,59 @@ impl Default for Correspondence {
 
 /// One laser scan: `nrays` rays with polar + cartesian representations.
 ///
-/// C: `struct laser_data` in `laser_data.h`
 #[derive(Clone, Debug)]
-pub struct LaserData {
-    /// Number of rays in this scan. C: `laser_data.nrays`
+pub struct ScanData {
+    /// Number of rays in this scan.
     pub nrays: usize,
-    /// Angle of the first ray. C: `laser_data.min_theta`
+    /// Angle of the first ray.
     pub min_theta: f64,
-    /// Angle of the last ray. C: `laser_data.max_theta`
+    /// Angle of the last ray.
     pub max_theta: f64,
 
-    /// Ray angles in scan order. C: `laser_data.theta`
+    /// Ray angles in scan order.
     pub theta: Vec<f64>,
-    /// Explicit validity flag for each ray. C: `laser_data.valid`
+    /// Explicit validity flag for each ray.
     pub valid: Vec<bool>,
     /// Polar range reading for each ray; invalid readings are commonly NaN.
-    /// C: `laser_data.readings`
     pub readings: Vec<f64>,
     /// Per-ray standard deviation; NaN means no value is supplied.
-    /// C: `laser_data.readings_sigma`
     pub readings_sigma: Vec<f64>,
 
-    /// Cluster index for each ray (-1 means no cluster). C: `laser_data.cluster`
+    /// Cluster index for each ray (-1 means no cluster).
     pub cluster: Vec<i32>,
-    /// Estimated surface orientation (NaN if not computed). C: `laser_data.alpha`
+    /// Estimated surface orientation (NaN if not computed).
     pub alpha: Vec<f64>,
-    /// Orientation covariance (NaN if not computed). C: `laser_data.cov_alpha`
+    /// Orientation covariance (NaN if not computed).
     pub cov_alpha: Vec<f64>,
     /// Whether the corresponding `alpha` value is usable.
-    /// C: `laser_data.alpha_valid`
     pub alpha_valid: Vec<bool>,
     /// Ground-truth surface orientation used by ML weighting when available.
-    /// C: `laser_data.true_alpha`
     pub true_alpha: Vec<f64>,
 
-    /// Correspondence for each sensor ray. C: `laser_data.corr`
+    /// Correspondence for each sensor ray.
     pub corr: Vec<Correspondence>,
 
-    /// Cartesian points in the scan frame. C: `points`
-    pub points: Vec<Point2d>,
-    /// Cartesian points in the world frame. C: `points_w`
-    pub points_w: Vec<Point2d>,
+    /// Cartesian points in the scan frame.
+    pub points: Vec<Point>,
+    /// Cartesian points in the world frame.
+    pub points_w: Vec<Point>,
 
     /// Jump table to the next larger reading while walking upward.
-    /// C: `laser_data.up_bigger`
     pub up_bigger: Vec<i32>,
     /// Jump table to the next smaller reading while walking upward.
-    /// C: `laser_data.up_smaller`
     pub up_smaller: Vec<i32>,
     /// Jump table to the next larger reading while walking downward.
-    /// C: `laser_data.down_bigger`
     pub down_bigger: Vec<i32>,
     /// Jump table to the next smaller reading while walking downward.
-    /// C: `laser_data.down_smaller`
     pub down_smaller: Vec<i32>,
 }
 
-impl LaserData {
+impl ScanData {
     /// Allocate a scan with `nrays` rays spanning `[min_theta, max_theta]`;
-    /// `theta` is linearly spaced (so the C invariant `min_theta == theta[0]`
-    /// holds). Everything else mirrors `ld_alloc()`: rays invalid, readings
+    /// `theta` is linearly spaced (so `min_theta == theta[0]` and
+    /// `max_theta == theta[last]`). Rays start invalid, readings
     /// NaN, cluster -1, correspondences unset, points NaN.
     ///
-    /// C: `ld_alloc_new()` / `ld_alloc()` in `laser_data.c`
     pub fn new(nrays: usize, min_theta: f64, max_theta: f64) -> Self {
         let theta: Vec<f64> = match nrays {
             0 => Vec::new(),
@@ -135,7 +114,7 @@ impl LaserData {
                 .map(|i| min_theta + (max_theta - min_theta) * i as f64 / (nrays - 1) as f64)
                 .collect(),
         };
-        let nan_point = Point2d {
+        let nan_point = Point {
             p: [f64::NAN, f64::NAN],
             rho: f64::NAN,
             phi: f64::NAN,
@@ -167,12 +146,9 @@ impl LaserData {
     ///
     /// `theta`, `readings`, and `valid` must have the same length. Invalid
     /// readings should be represented with `valid[i] == false`; keeping their
-    /// value as NaN matches CSM's data model. The first and last angles become
+    /// value as NaN. The first and last angles become
     /// `min_theta` and `max_theta`, respectively, and the complete scan is
     /// validated before it is returned.
-    ///
-    /// C: `ld_alloc_new()`, followed by filling `theta`, `readings`, and
-    /// `valid`, then checking with `ld_valid_fields()` in `laser_data.c`.
     pub fn from_polar(
         theta: Vec<f64>,
         readings: Vec<f64>,
@@ -239,15 +215,18 @@ impl LaserData {
     /// Reserve room for at least `capacity` rays without changing the current
     /// scan shape. This is the only operation that grows a prepared scan.
     pub fn reserve_rays(&mut self, capacity: usize) {
-        self.theta.reserve(capacity.saturating_sub(self.theta.len()));
-        self.valid.reserve(capacity.saturating_sub(self.valid.len()));
+        self.theta
+            .reserve(capacity.saturating_sub(self.theta.len()));
+        self.valid
+            .reserve(capacity.saturating_sub(self.valid.len()));
         self.readings
             .reserve(capacity.saturating_sub(self.readings.len()));
         self.readings_sigma
             .reserve(capacity.saturating_sub(self.readings_sigma.len()));
         self.cluster
             .reserve(capacity.saturating_sub(self.cluster.len()));
-        self.alpha.reserve(capacity.saturating_sub(self.alpha.len()));
+        self.alpha
+            .reserve(capacity.saturating_sub(self.alpha.len()));
         self.cov_alpha
             .reserve(capacity.saturating_sub(self.cov_alpha.len()));
         self.alpha_valid
@@ -284,7 +263,7 @@ impl LaserData {
         self.alpha_valid.resize(nrays, false);
         self.true_alpha.resize(nrays, f64::NAN);
         self.corr.resize(nrays, Correspondence::default());
-        let nan_point = Point2d {
+        let nan_point = Point {
             p: [f64::NAN, f64::NAN],
             rho: f64::NAN,
             phi: f64::NAN,
@@ -308,7 +287,6 @@ impl LaserData {
 
     /// Mark valid rays outside `(min_reading, max_reading]` as invalid.
     ///
-    /// C: `ld_invalid_if_outside()` in `icp/icp.c`
     pub fn invalid_if_outside(&mut self, min_reading: f64, max_reading: f64) {
         for i in 0..self.nrays {
             if !self.valid[i] {
@@ -321,11 +299,10 @@ impl LaserData {
         }
     }
 
-    /// Polar → cartesian in the scan frame, for *all* rays (C-faithful: no
+    /// Polar → cartesian in the scan frame, for *all* rays (no
     /// validity check, so NaN readings yield NaN points). `rho`/`phi` of
     /// `points` are set to NaN.
     ///
-    /// C: `ld_compute_cartesian()` in `laser_data.c`
     pub fn compute_cartesian(&mut self) {
         for i in 0..self.nrays {
             self.points[i].p[0] = self.theta[i].cos() * self.readings[i];
@@ -338,7 +315,6 @@ impl LaserData {
     /// Transform `points` into the world frame under `pose` (valid rays
     /// only), then compute `rho`/`phi` of `points_w` for *all* rays.
     ///
-    /// C: `ld_compute_world_coords()` in `laser_data.c`
     pub fn compute_world_coords(&mut self, pose: &[f64; 3]) {
         let (px, py, theta) = (pose[0], pose[1], pose[2]);
         let (c, s) = (theta.cos(), theta.sin());
@@ -358,11 +334,8 @@ impl LaserData {
     }
 
     /// Invalidate points hidden from a viewpoint when their bearing reverses
-    /// along the scan order.
-    ///
-    /// C: `visibilityTest()` in `sm/csm/icp/icp_outliers.c`. The C routine
-    /// uses only the viewpoint translation; the pose angle is intentionally
-    /// ignored.
+    /// along the scan order. Only the viewpoint translation is used; the pose
+    /// angle is intentionally ignored.
     #[cfg(test)]
     pub fn visibility_test(&mut self, viewpoint: &[f64; 3]) {
         let mut theta_from_viewpoint = vec![f64::NAN; self.nrays];
@@ -396,7 +369,6 @@ impl LaserData {
 
     /// Build the four jump tables used by the tricks correspondence search.
     ///
-    /// C: `ld_create_jump_tables()` in `icp/icp_corr_tricks.c`
     pub fn create_jump_tables(&mut self) {
         for i in 0..self.nrays {
             let mut j = i as i32 + 1;
@@ -435,9 +407,8 @@ impl LaserData {
 
     /// Cluster consecutive valid rays whose readings jump by less than
     /// `threshold`. Invalid rays get cluster -1; `last_reading` survives
-    /// invalid rays (C-faithful).
+    /// invalid rays.
     ///
-    /// C: `ld_simple_clustering()` in `clustering.c`
     pub fn simple_clustering(&mut self, threshold: f64) {
         let mut cluster: i32 = -1;
         let mut last_reading = 0.0;
@@ -456,12 +427,10 @@ impl LaserData {
         }
     }
 
-    /// Neighbour ray indexes for orientation estimation: up to `max_num`
-    /// valid same-cluster rays ascending, then descending (order preserved
-    /// for floating-point fidelity).
-    ///
-    /// C: `find_neighbours()` in `orientation.c` — note the asymmetric
-    /// bounds (`up+1 <= i+max_num` vs `down >= i-max_num`), ported as-is.
+    /// Neighbour ray indexes for orientation estimation: up to `max_num` valid
+    /// same-cluster rays ascending, then descending. The asymmetric index
+    /// bounds (`up + 1 <= i + max_num` vs `down >= i - max_num`) are preserved
+    /// for floating-point fidelity.
     #[cfg(test)]
     fn find_neighbours(&self, i: usize, max_num: i32) -> Vec<usize> {
         let mut indexes = Vec::new();
@@ -495,7 +464,6 @@ impl LaserData {
     /// Estimate the local surface orientation at each valid, clustered ray.
     /// Requires `cluster` to be set (see [`Self::simple_clustering`]).
     ///
-    /// C: `ld_compute_orientation()` in `orientation.c`
     #[cfg(test)]
     pub fn compute_orientation(&mut self, size_neighbourhood: i32, sigma: f64) {
         let mut scratch = OrientationScratch::new(size_neighbourhood);
@@ -542,8 +510,20 @@ impl LaserData {
                 b,
                 ..
             } = scratch;
-            let (alpha, cov0_alpha) =
-                filter_orientation_into(self.theta[i], self.readings[i], &thetas[..n], &rhos[..n], y, r, rrt, lu, perm, erinv, erinv_y, b);
+            let (alpha, cov0_alpha) = filter_orientation_into(
+                self.theta[i],
+                self.readings[i],
+                &thetas[..n],
+                &rhos[..n],
+                y,
+                r,
+                rrt,
+                lu,
+                perm,
+                erinv,
+                erinv_y,
+                b,
+            );
             if alpha.is_nan() {
                 self.alpha[i] = f64::NAN;
                 self.cov_alpha[i] = f64::NAN;
@@ -556,13 +536,12 @@ impl LaserData {
         }
     }
 
-    /// Structural validation of the scan, mirroring the C checks.
+    /// Structural validation of the scan.
     ///
-    /// C: `ld_valid_fields()` in `laser_data.c`
     pub fn validate(&self) -> Result<(), ScanError> {
         use ScanError as E;
 
-        // The C representation allocates every per-ray array together. Rust
+        // Every per-ray array is allocated together. Rust
         // callers can mutate the public vectors, so check their shape before
         // any indexed access below. This keeps malformed input an error rather
         // than an indexing panic at the public matcher boundary.
@@ -593,7 +572,7 @@ impl LaserData {
             }
         }
 
-        // The C implementation capped this at 10,000, but Rust callers may
+        // The reading count is not capped at 10,000, but callers may
         // use larger industrial scans; allocation is bounded by the input.
         if self.nrays < 10 {
             return Err(E::NraysOutOfRange);
@@ -632,7 +611,7 @@ impl LaserData {
             }
         }
         let num_valid = self.valid.iter().filter(|&&v| v).count();
-        // C compares in floating point: num_valid < nrays * 0.10
+        // Compare in floating point: num_valid < nrays * 0.10
         if (num_valid as f64) < self.nrays as f64 * 0.10 {
             return Err(E::TooFewValidRays);
         }
@@ -641,13 +620,15 @@ impl LaserData {
 }
 
 /// Input validation failures, mirroring the `sm_error` checks in
-/// `ld_valid_fields()`. Malformed input is an error; a failed *match* is not.
+/// Validation. Malformed input is an error; a failed *match* is not.
 ///
-/// C: `ld_valid_fields()` in `laser_data.c`
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ScanError {
     /// An in-place prepared update exceeds the workspace capacity.
-    CapacityExceeded { capacity: usize, requested: usize },
+    CapacityExceeded {
+        capacity: usize,
+        requested: usize,
+    },
     /// A per-ray field does not contain exactly `nrays` entries.
     InconsistentLengths {
         /// Name of the field with the wrong length.
@@ -659,19 +640,12 @@ pub enum ScanError {
     },
     /// At least 10 rays are required. There is no artificial upper bound.
     NraysOutOfRange,
-    /// C: min/max theta must not be NaN
     NanThetaBounds,
-    /// C: FOV must be in [20 deg, 2.01 pi]
     FovOutOfRange,
-    /// C: min_theta must equal `theta[0]`, max_theta must equal `theta[last]`
     ThetaBoundsMismatch,
-    /// C: a valid ray must have non-NaN reading/theta and reading in (0, 100)
     BadValidRay(usize),
-    /// C: invalid rays must have cluster == -1, and cluster must be >= -1
     BadCluster(usize),
-    /// C: readings_sigma must be non-negative when set
     NegativeSigma(usize),
-    /// C: at least 10% of rays must be valid
     TooFewValidRays,
     /// Two adjacent valid beams have the same bearing.
     DuplicateBearing(usize),
@@ -769,9 +743,8 @@ impl OrientationScratch {
 /// Weighted least-squares orientation filter. Returns `(alpha, cov0_alpha)`;
 /// `alpha` is NaN when the system is singular.
 ///
-/// C: `filter_orientation()` in `orientation.c`. The model is
 /// `Y = L·f1 + R·ε` with `L = ones(n)`, solved via the n×n inverse of
-/// `R·Rᵀ` (egsl in C; [`crate::math::invert_flat_into`] here).
+/// `R·Rᵀ` with [`crate::math::invert_flat_into`].
 #[allow(clippy::too_many_arguments)]
 fn filter_orientation_into(
     theta0: f64,
@@ -848,10 +821,10 @@ fn filter_orientation_into(
 mod tests {
     use super::*;
 
-    /// A scan that passes ld_valid_fields: 100 rays over 180°, all valid,
+    /// A valid scan: 100 rays over 180°, all valid,
     /// readings in (0, 100).
-    fn valid_scan() -> LaserData {
-        let mut ld = LaserData::new(100, -1.5, 1.5);
+    fn valid_scan() -> ScanData {
+        let mut ld = ScanData::new(100, -1.5, 1.5);
         for i in 0..100 {
             ld.valid[i] = true;
             ld.readings[i] = 5.0;
@@ -866,18 +839,13 @@ mod tests {
 
     #[test]
     fn validate_rejects_too_few_rays() {
-        // C: nrays < 10 rejected
-        let ld = LaserData::new(5, -1.0, 1.0);
-        assert!(matches!(
-            ld.validate(),
-            Err(ScanError::NraysOutOfRange)
-        ));
+        let ld = ScanData::new(5, -1.0, 1.0);
+        assert!(matches!(ld.validate(), Err(ScanError::NraysOutOfRange)));
     }
 
     #[test]
     fn validate_rejects_narrow_fov() {
-        // C: FOV < 20 deg rejected (100 rays over 0.1 rad)
-        let mut ld = LaserData::new(100, 0.0, 0.1);
+        let mut ld = ScanData::new(100, 0.0, 0.1);
         for i in 0..100 {
             ld.valid[i] = true;
             ld.readings[i] = 5.0;
@@ -887,28 +855,20 @@ mod tests {
 
     #[test]
     fn validate_rejects_theta_bounds_mismatch() {
-        // C: |min_theta - theta[0]| > 1e-8 rejected
         let mut ld = valid_scan();
         ld.min_theta = ld.theta[0] + 1e-6;
-        assert!(matches!(
-            ld.validate(),
-            Err(ScanError::ThetaBoundsMismatch)
-        ));
+        assert!(matches!(ld.validate(), Err(ScanError::ThetaBoundsMismatch)));
     }
 
     #[test]
     fn validate_rejects_nan_reading_on_valid_ray() {
         let mut ld = valid_scan();
         ld.readings[42] = f64::NAN;
-        assert!(matches!(
-            ld.validate(),
-            Err(ScanError::BadValidRay(42))
-        ));
+        assert!(matches!(ld.validate(), Err(ScanError::BadValidRay(42))));
     }
 
     #[test]
     fn validate_rejects_reading_outside_sensor_range() {
-        // C: valid readings must be in (0, 100)
         let mut ld = valid_scan();
         ld.readings[7] = 150.0;
         assert!(matches!(ld.validate(), Err(ScanError::BadValidRay(7))));
@@ -926,15 +886,11 @@ mod tests {
     fn validate_rejects_negative_sigma() {
         let mut ld = valid_scan();
         ld.readings_sigma[9] = -1.0;
-        assert!(matches!(
-            ld.validate(),
-            Err(ScanError::NegativeSigma(9))
-        ));
+        assert!(matches!(ld.validate(), Err(ScanError::NegativeSigma(9))));
     }
 
     #[test]
     fn invalid_if_outside_marks_rays() {
-        // C: ld_invalid_if_outside — valid rays with r <= min or r > max become invalid
         let mut ld = valid_scan();
         ld.readings[0] = 0.5; // below min
         ld.readings[1] = 5.0; // inside
@@ -951,8 +907,7 @@ mod tests {
 
     #[test]
     fn compute_cartesian_fills_all_rays_polar_nan() {
-        // C: ld_compute_cartesian — every ray, rho/phi set to NaN
-        let mut ld = LaserData::new(10, 0.0, 1.0);
+        let mut ld = ScanData::new(10, 0.0, 1.0);
         for i in 0..10 {
             ld.valid[i] = true;
         }
@@ -962,15 +917,14 @@ mod tests {
         assert!((ld.points[0].p[0] - 2.0).abs() < 1e-15);
         assert!((ld.points[0].p[1] - 0.0).abs() < 1e-15);
         assert!(ld.points[0].rho.is_nan() && ld.points[0].phi.is_nan());
-        // NaN readings propagate to NaN points (C-faithful: no valid check)
+        // NaN readings propagate to NaN points (no valid check)
         assert!(ld.points[5].p[0].is_nan());
     }
 
     #[test]
     fn compute_world_coords_transforms_valid_rays_only() {
-        // C: ld_compute_world_coords — p transformed for valid rays only,
         // rho/phi computed for ALL rays
-        let mut ld = LaserData::new(10, -1.0, 1.0);
+        let mut ld = ScanData::new(10, -1.0, 1.0);
         ld.valid[0] = true;
         ld.readings[0] = 2.0;
         ld.theta[0] = 0.0;
@@ -989,7 +943,7 @@ mod tests {
 
     #[test]
     fn visibility_test_invalidates_bearing_reversals() {
-        let mut ld = LaserData::new(10, -1.0, 1.0);
+        let mut ld = ScanData::new(10, -1.0, 1.0);
         for i in 0..ld.nrays {
             ld.valid[i] = true;
             let angle = if i == 5 { -1.0 } else { -1.0 + 0.2 * i as f64 };
@@ -1003,9 +957,9 @@ mod tests {
 
     #[test]
     fn jump_tables_hand_computed_example() {
-        // Worked example, computed by hand from the C loops:
+        // Worked example, computed by hand:
         // readings = [3, 1, 2, 2, 5, 4], all valid
-        let mut ld = LaserData::new(6, -0.5, 0.5);
+        let mut ld = ScanData::new(6, -0.5, 0.5);
         for (i, &r) in [3.0, 1.0, 2.0, 2.0, 5.0, 4.0].iter().enumerate() {
             ld.valid[i] = true;
             ld.readings[i] = r;
@@ -1019,8 +973,7 @@ mod tests {
 
     #[test]
     fn jump_tables_stop_at_invalid_rays() {
-        // C: the while conditions test ld->valid[j] first
-        let mut ld = LaserData::new(10, -1.0, 1.0);
+        let mut ld = ScanData::new(10, -1.0, 1.0);
         for i in 0..10 {
             ld.valid[i] = true;
             ld.readings[i] = 5.0;
@@ -1036,7 +989,7 @@ mod tests {
     #[test]
     fn simple_clustering_splits_on_jumps() {
         // Worked: readings [1, 1.01, 3, 3.02, 1], threshold 0.05 -> [0,0,1,1,2]
-        let mut ld = LaserData::new(10, -1.0, 1.0);
+        let mut ld = ScanData::new(10, -1.0, 1.0);
         for (i, &r) in [1.0, 1.01, 3.0, 3.02, 1.0].iter().enumerate() {
             ld.valid[i] = true;
             ld.readings[i] = r;
@@ -1049,9 +1002,9 @@ mod tests {
 
     #[test]
     fn simple_clustering_bridges_invalid_rays() {
-        // C-faithful: last_reading survives invalid rays, so [1, X, 1.01]
+        // last_reading survives invalid rays, so [1, X, 1.01]
         // with threshold 0.05 stays one cluster: [0, -1, 0]
-        let mut ld = LaserData::new(10, -1.0, 1.0);
+        let mut ld = ScanData::new(10, -1.0, 1.0);
         ld.valid[0] = true;
         ld.readings[0] = 1.0;
         ld.valid[2] = true;
@@ -1063,10 +1016,10 @@ mod tests {
     #[test]
     fn find_neighbours_walks_cluster_both_ways() {
         // Worked: 10 valid rays, one cluster, max_num=2, i=5
-        // ups first (ascending), then downs (descending); the C down-walk
+        // ups first (ascending), then downs (descending); the down-walk
         // condition is checked before decrementing, so it yields max_num+1
         // downs: [6,7,4,3,2]
-        let mut ld = LaserData::new(10, -1.0, 1.0);
+        let mut ld = ScanData::new(10, -1.0, 1.0);
         for i in 0..10 {
             ld.valid[i] = true;
             ld.readings[i] = 5.0;
@@ -1079,7 +1032,7 @@ mod tests {
 
     #[test]
     fn find_neighbours_stops_at_cluster_change() {
-        let mut ld = LaserData::new(10, -1.0, 1.0);
+        let mut ld = ScanData::new(10, -1.0, 1.0);
         for i in 0..10 {
             ld.valid[i] = true;
             ld.readings[i] = 5.0;
@@ -1095,19 +1048,19 @@ mod tests {
 
     #[test]
     fn compute_orientation_matches_c_reference() {
-        // Ground truth from the C library: wall y=2, 181 rays over
+        // Ground truth: wall y=2, 181 rays over
         // [0.2, pi-0.2], one cluster, neighbourhood 3, sigma 0.01.
         let nrays = 181;
         let (tmin, tmax) = (0.2, std::f64::consts::PI - 0.2);
-        let mut ld = LaserData::new(nrays, tmin, tmax);
+        let mut ld = ScanData::new(nrays, tmin, tmax);
         for i in 0..nrays {
             ld.valid[i] = true;
             ld.readings[i] = 2.0 / ld.theta[i].sin();
         }
         ld.simple_clustering(1000.0);
         ld.compute_orientation(3, 0.01);
-        // (ray, alpha, cov_alpha) as printed by the C reference
-        let golden: [(usize, f64, f64); 7] = [
+        // (ray, alpha, cov_alpha) as produced by the reference
+        let expected: [(usize, f64, f64); 7] = [
             (0, 4.667_736_996_433_337, 2.982_699_741_012_538e-6),
             (30, 4.72744521612307, 0.00012508773117607194),
             (60, 4.7224561370844995, 0.00131686988590062),
@@ -1116,17 +1069,17 @@ mod tests {
             (150, 4.722188768107566, 0.00014216371217088818),
             (180, 4.772_113_047_180_021, 1.9109700429176555e-06),
         ];
-        for (i, alpha, cov) in golden {
+        for (i, alpha, cov) in expected {
             assert!(ld.alpha_valid[i], "ray {i} should have valid alpha");
             assert!(
                 (ld.alpha[i] - alpha).abs() < 1e-9,
-                "ray {i}: alpha {} vs golden {}",
+                "ray {i}: alpha {} vs expected {}",
                 ld.alpha[i],
                 alpha
             );
             assert!(
                 (ld.cov_alpha[i] - cov).abs() / cov < 1e-6,
-                "ray {i}: cov_alpha {} vs golden {}",
+                "ray {i}: cov_alpha {} vs expected {}",
                 ld.cov_alpha[i],
                 cov
             );
@@ -1135,23 +1088,19 @@ mod tests {
 
     #[test]
     fn validate_rejects_too_few_valid_rays() {
-        // C: needs >= 10% valid rays
-        let mut ld = LaserData::new(100, -1.5, 1.5);
+        let mut ld = ScanData::new(100, -1.5, 1.5);
         for i in 0..5 {
             ld.valid[i] = true;
             ld.readings[i] = 5.0;
         }
-        assert!(matches!(
-            ld.validate(),
-            Err(ScanError::TooFewValidRays)
-        ));
+        assert!(matches!(ld.validate(), Err(ScanError::TooFewValidRays)));
     }
 
     #[test]
     fn new_mirrors_ld_alloc_initialization() {
-        let ld = LaserData::new(11, -1.0, 1.0);
+        let ld = ScanData::new(11, -1.0, 1.0);
         assert_eq!(ld.nrays, 11);
-        // theta linearly spaced, endpoints exact (C invariant: theta[0] == min_theta)
+        // theta linearly spaced, endpoints exact (theta[0] == min_theta)
         assert_eq!(ld.theta[0], -1.0);
         assert_eq!(ld.theta[10], 1.0);
         assert!((ld.theta[5] - 0.0).abs() < 1e-15);

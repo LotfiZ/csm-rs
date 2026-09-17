@@ -1,31 +1,17 @@
 //! Correspondence finding and outlier rejection.
 //!
-//! C: `sm/csm/icp/icp_corr_tricks.c` (jump-table search),
-//!     `sm/csm/icp/icp_corr_dumb.c` (naive search),
-//!     `sm/csm/icp/icp_outliers.c` (trim + doubles rejection),
-//!     `sm/csm/laser_data.c` (`possible_interval`, visibility test)
+//! Property-test invariant: the `Tricks` and `Naive` strategies must produce
+//! identical correspondence sets when `debug_verify_tricks` is enabled.
 //!
-//! Property-test invariant: `Tricks` and `Naive` strategies
-//! must produce identical correspondence sets — the same invariant C checks
-//! with `debug_verify_tricks`.
-//!
-//! The upstream `misc/tests/failure1/stallo2.log` regression corpus is an
-//! explicit exception: C's smart and naive searches diverge on its invalid
-//! sectors. The golden test records that divergence while checking the
-//! configured smart path and its first-iteration hash against C.
-//!
-//! The upstream tricks routine does not call `compatible()` for its optional
-//! alpha filter. That C asymmetry is preserved here; alpha-enabled fixtures
-//! therefore use the naive strategy at the public golden seam.
+//! The smart routine does not apply `compatible()` to its optional alpha
+//! filter, so alpha-enabled scans use the naive strategy.
 
-use crate::laser_data::{CorrespondenceType, LaserData};
 use crate::math::{angle_diff, corr_hash, distance_squared, distance_to_segment, norm};
 use crate::params::{CorrespondenceSearch, DistanceMetric, OutlierParams, Params};
+use crate::scan_data::{CorrespondenceType, ScanData};
 
-/// The bookkeeping result produced by CSM's trimming pass.
+/// The bookkeeping result produced by the trimming pass.
 ///
-/// C: the `total_error` and `valid` outputs of `kill_outliers_trim()` in
-/// `sm/csm/icp/icp_outliers.c`.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) struct OutlierResult {
     pub total_error: f64,
@@ -33,22 +19,18 @@ pub(crate) struct OutlierResult {
 }
 
 /// Find correspondences using the currently available search strategy.
-///
-/// C: `icp_loop.c` dispatches to `find_correspondences_tricks()` or
-/// `find_correspondences()` based on `use_corr_tricks`.
 pub(crate) fn find_correspondences(
     params: &Params,
-    laser_ref: &LaserData,
-    laser_sens: &mut LaserData,
+    laser_ref: &ScanData,
+    laser_sens: &mut ScanData,
 ) {
     match params.correspondence.search {
         CorrespondenceSearch::Naive => find_correspondences_naive(params, laser_ref, laser_sens),
         CorrespondenceSearch::Tricks => find_correspondences_tricks(params, laser_ref, laser_sens),
     }
 
-    // C: `debug_correspondences()` in `icp_debug.c`. Run both strategies on
     // identical inputs and compare the observable correspondence key and its
-    // hash when the caller requests the CSM debug check.
+    // hash when the caller requests the debug check.
     if params.debug_verify_tricks {
         let mut tricks = laser_sens.clone();
         let mut naive = laser_sens.clone();
@@ -70,10 +52,9 @@ pub(crate) fn find_correspondences(
 
 /// Find the nearest reference ray with the jump-table search.
 ///
-/// C: `sm/csm/icp/icp_corr_tricks.c:find_correspondences_tricks()`
-/// The C routine intentionally does not apply `compatible()`; preserve that
+/// The smart routine intentionally does not apply `compatible()`; preserve that
 /// behavior even when the optional alpha filter is enabled.
-fn find_correspondences_tricks(params: &Params, laser_ref: &LaserData, laser_sens: &mut LaserData) {
+fn find_correspondences_tricks(params: &Params, laser_ref: &ScanData, laser_sens: &mut ScanData) {
     let c1 = laser_ref.nrays as f64 / (laser_ref.max_theta - laser_ref.min_theta);
     let max_correspondence_dist2 = params.correspondence.max_dist * params.correspondence.max_dist;
     let mut last_best = -1;
@@ -110,7 +91,7 @@ fn find_correspondences_tricks(params: &Params, laser_ref: &LaserData, laser_sen
         let mut down_stopped = false;
 
         while !up_stopped || !down_stopped {
-            // C chooses the side whose last distance is smaller. The
+            // Choose the side whose last distance is smaller. The
             // initial values make the first visit the `down` side.
             let now_up = if up_stopped {
                 false
@@ -229,7 +210,7 @@ fn find_correspondences_tricks(params: &Params, laser_ref: &LaserData, laser_sen
             }
         };
 
-        // C advances this state only after a complete correspondence has
+        // Advance this state only after a complete correspondence has
         // been accepted, so failed and endpoint matches do not affect the
         // next sensor ray's starting cell.
         last_best = j1;
@@ -246,10 +227,8 @@ fn find_correspondences_tricks(params: &Params, laser_ref: &LaserData, laser_sen
     }
 }
 
-/// Approximation used by the C smart search's angular lower bound.
-///
-/// C: `mysin()` in `sm/csm/icp/icp_corr_tricks.c`; the approximation is
-/// deliberately retained instead of replacing it with `f64::sin()`.
+/// Polynomial approximation of sin used by the smart search's angular lower
+/// bound. Kept instead of `f64::sin()` to match the search's error behaviour.
 fn mysin(x: f64) -> f64 {
     let a = -1.0 / 6.0;
     let b = 1.0 / 120.0;
@@ -259,11 +238,10 @@ fn mysin(x: f64) -> f64 {
 
 /// Find the nearest reference ray for every valid sensor ray.
 ///
-/// C: `sm/csm/icp/icp_corr_dumb.c:find_correspondences()`
 pub(crate) fn find_correspondences_naive(
     params: &Params,
-    laser_ref: &LaserData,
-    laser_sens: &mut LaserData,
+    laser_ref: &ScanData,
+    laser_sens: &mut ScanData,
 ) {
     let max_correspondence_dist2 = params.correspondence.max_dist * params.correspondence.max_dist;
 
@@ -338,18 +316,17 @@ pub(crate) fn find_correspondences_naive(
 }
 
 /// Remove duplicate sensor-to-reference matches, keeping every match within
-/// CSM's fixed three-times-distance rule of the nearest match.
+/// The fixed three-times-distance rule of the nearest match.
 ///
-/// C: `kill_outliers_double()` in `sm/csm/icp/icp_outliers.c`.
 #[cfg(test)]
-pub(crate) fn kill_outliers_double(laser_ref: &LaserData, laser_sens: &mut LaserData) {
+pub(crate) fn kill_outliers_double(laser_ref: &ScanData, laser_sens: &mut ScanData) {
     let mut nearest = vec![0.0; laser_ref.nrays];
     kill_outliers_double_with_scratch(laser_ref, laser_sens, &mut nearest);
 }
 
 pub(crate) fn kill_outliers_double_with_scratch(
-    laser_ref: &LaserData,
-    laser_sens: &mut LaserData,
+    laser_ref: &ScanData,
+    laser_sens: &mut ScanData,
     nearest_distances: &mut [f64],
 ) {
     const THRESHOLD: f64 = 3.0;
@@ -379,7 +356,7 @@ pub(crate) fn kill_outliers_double_with_scratch(
         if j1 < laser_ref.nrays
             && correspondence.dist2_j1 > THRESHOLD * THRESHOLD * nearest_distances[j1]
         {
-            // C changes only the valid bit in this pass; preserve the other
+            // Only the valid bit changes in this pass; preserve the other
             // fields until the trim pass, exactly as `kill_outliers_double()`.
             correspondence.valid = false;
         }
@@ -388,12 +365,11 @@ pub(crate) fn kill_outliers_double_with_scratch(
 
 /// Trim correspondences using the fixed-percentile and adaptive thresholds.
 ///
-/// C: `kill_outliers_trim()` in `sm/csm/icp/icp_outliers.c`.
 #[cfg(test)]
 pub(crate) fn kill_outliers_trim(
     params: &OutlierParams,
-    laser_ref: &LaserData,
-    laser_sens: &mut LaserData,
+    laser_ref: &ScanData,
+    laser_sens: &mut ScanData,
 ) -> OutlierResult {
     let mut distances_by_sensor = vec![f64::NAN; laser_sens.nrays];
     let mut distances = Vec::with_capacity(laser_sens.nrays);
@@ -408,8 +384,8 @@ pub(crate) fn kill_outliers_trim(
 
 pub(crate) fn kill_outliers_trim_with_scratch(
     params: &OutlierParams,
-    laser_ref: &LaserData,
-    laser_sens: &mut LaserData,
+    laser_ref: &ScanData,
+    laser_sens: &mut ScanData,
     distances_by_sensor: &mut [f64],
     distances: &mut Vec<f64>,
 ) -> OutlierResult {
@@ -465,7 +441,7 @@ pub(crate) fn kill_outliers_trim_with_scratch(
     }
 }
 
-/// C clamps both order statistics to `[0, k - 1]` after taking `floor(k*f)`.
+/// Both order statistics are clamped to `[0, k - 1]` after `floor(k*f)`.
 fn percentile_index(count: usize, fraction: f64) -> usize {
     let upper = (count - 1) as f64;
     (count as f64 * fraction).floor().clamp(0.0, upper) as usize
@@ -473,11 +449,9 @@ fn percentile_index(count: usize, fraction: f64) -> usize {
 
 /// Euclidean distance from a sensor point to its reference segment.
 ///
-/// C: `dist_to_segment_d()` as called by `kill_outliers_trim()` in
-/// `sm/csm/icp/icp_outliers.c`.
 pub(crate) fn correspondence_distance(
-    laser_ref: &LaserData,
-    laser_sens: &LaserData,
+    laser_ref: &ScanData,
+    laser_sens: &ScanData,
     i: usize,
 ) -> Option<f64> {
     let correspondence = laser_sens.corr.get(i)?;
@@ -493,13 +467,12 @@ pub(crate) fn correspondence_distance(
     ))
 }
 
-/// C: `sm/csm/icp/icp_corr_dumb.c:compatible()`
 fn compatible(
     params: &Params,
     i: usize,
     j: usize,
-    laser_ref: &LaserData,
-    laser_sens: &LaserData,
+    laser_ref: &ScanData,
+    laser_sens: &ScanData,
 ) -> bool {
     if !params.correspondence.do_alpha_test {
         return true;
@@ -519,10 +492,9 @@ fn compatible(
 /// Restrict a correspondence search to the angular cells reachable under the
 /// configured correction limits.
 ///
-/// C: `sm/csm/math_utils.c:possible_interval()`
 fn possible_interval(
     point_world: [f64; 2],
-    laser_ref: &LaserData,
+    laser_ref: &ScanData,
     max_angular_correction_deg: f64,
     max_linear_correction: f64,
 ) -> (i32, i32, i32) {
@@ -547,24 +519,22 @@ fn possible_interval(
     (from, to, start_cell)
 }
 
-/// C: `ld_next_valid_up()` / `ld_next_valid_down()` in `laser_data_inline.h`
-fn next_valid(laser_data: &LaserData, i: usize, direction: i32) -> Option<usize> {
+fn next_valid(scan_data: &ScanData, i: usize, direction: i32) -> Option<usize> {
     let mut j = i as i32 + direction;
-    while j >= 0 && j < laser_data.nrays as i32 && !laser_data.valid[j as usize] {
+    while j >= 0 && j < scan_data.nrays as i32 && !scan_data.valid[j as usize] {
         j += direction;
     }
-    (j >= 0 && j < laser_data.nrays as i32).then_some(j as usize)
+    (j >= 0 && j < scan_data.nrays as i32).then_some(j as usize)
 }
 
-/// C: `ld_set_null_correspondence()` in `laser_data_inline.h`
-fn set_null_correspondence(laser_sens: &mut LaserData, i: usize) {
+fn set_null_correspondence(laser_sens: &mut ScanData, i: usize) {
     laser_sens.corr[i].valid = false;
     laser_sens.corr[i].j1 = -1;
     laser_sens.corr[i].j2 = -1;
     laser_sens.corr[i].dist2_j1 = f64::NAN;
 }
 
-fn correspondence_keys(laser_sens: &LaserData) -> Vec<Option<(i32, i32)>> {
+fn correspondence_keys(laser_sens: &ScanData) -> Vec<Option<(i32, i32)>> {
     laser_sens
         .corr
         .iter()
@@ -575,12 +545,12 @@ fn correspondence_keys(laser_sens: &LaserData) -> Vec<Option<(i32, i32)>> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::laser_data::Correspondence;
     use crate::math::corr_hash;
     use crate::params::OutlierParams;
+    use crate::scan_data::Correspondence;
 
-    fn smooth_scan(valid: impl Fn(usize) -> bool) -> LaserData {
-        let mut scan = LaserData::new(360, -1.5, 1.5);
+    fn smooth_scan(valid: impl Fn(usize) -> bool) -> ScanData {
+        let mut scan = ScanData::new(360, -1.5, 1.5);
         for i in 0..scan.nrays {
             if valid(i) {
                 let theta = scan.theta[i];
@@ -595,8 +565,8 @@ mod tests {
     }
 
     fn assert_tricks_matches_naive(
-        mut laser_ref: LaserData,
-        mut laser_sens: LaserData,
+        mut laser_ref: ScanData,
+        mut laser_sens: ScanData,
         pose: [f64; 3],
     ) {
         let mut naive_params = Params::default();
@@ -666,8 +636,8 @@ mod tests {
         params.correspondence.alpha_test_threshold_deg = 5.0;
         params.correction_limits.max_angular_deg = 0.0;
 
-        let mut laser_ref = LaserData::new(12, -1.0, 1.0);
-        let mut laser_sens = LaserData::new(12, -1.0, 1.0);
+        let mut laser_ref = ScanData::new(12, -1.0, 1.0);
+        let mut laser_sens = ScanData::new(12, -1.0, 1.0);
         laser_ref.alpha_valid[4] = true;
         laser_ref.alpha[4] = 0.0;
         laser_sens.alpha_valid[3] = true;
@@ -679,9 +649,9 @@ mod tests {
         assert!(compatible(&params, 3, 4, &laser_ref, &laser_sens));
     }
 
-    fn outlier_fixture() -> (LaserData, LaserData) {
-        let mut laser_ref = LaserData::new(12, -1.0, 1.0);
-        let mut laser_sens = LaserData::new(12, -1.0, 1.0);
+    fn outlier_fixture() -> (ScanData, ScanData) {
+        let mut laser_ref = ScanData::new(12, -1.0, 1.0);
+        let mut laser_sens = ScanData::new(12, -1.0, 1.0);
         for i in 0..12 {
             laser_ref.points[i].p = [0.0, -1.0 + i as f64 * 0.25];
             laser_sens.points_w[i].p = [0.1, 0.0];
@@ -698,7 +668,7 @@ mod tests {
         (laser_ref, laser_sens)
     }
 
-    fn configure_segment_correspondences(laser_ref: &mut LaserData, laser_sens: &mut LaserData) {
+    fn configure_segment_correspondences(laser_ref: &mut ScanData, laser_sens: &mut ScanData) {
         for i in 0..5 {
             laser_ref.points[2 * i].p = [0.0, -1.0];
             laser_ref.points[2 * i + 1].p = [0.0, 1.0];

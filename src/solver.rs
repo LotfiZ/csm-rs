@@ -1,42 +1,35 @@
 //! Closed-form weighted point-correspondence solver.
 //!
-//! C: `sm/lib/gpc/gpc.c` (`gpc_solve`, `gpc_total_error`),
-//!     `sm/lib/gpc/gpc_utils.c`,
-//!     `sm/csm/icp/icp_loop.c` (`compute_next_estimate`)
-//!
 //! Solves the general point-correspondence problem: find translation `t` and
 //! rotation `θ` minimizing Σ (R(θ)p + t − q)′ C (R(θ)p + t − q) over the
-//! valid correspondences. Closed form via 4×4 normal equations with 2×2
-//! block inverses, using small hand-rolled matrices.
+//! valid correspondences, where `C` is the per-correspondence weight matrix.
+//! Closed form via 4×4 normal equations with 2×2 block inverses.
 //!
-//! Note: upstream `gpc.c` is GPLv2+ (the rest of CSM is LGPLv3); this module
-//! is the GPL contaminant and the candidate for a future clean-room rewrite
-//! if copyleft ever blocks a use case.
+//! Licensing note: the vendored solver is GPLv2+ while the rest of the library
+//! is LGPLv3, so the combined crate is distributed as GPL-2.0-or-later.
 
-use crate::laser_data::{CorrespondenceType, LaserData};
 use crate::math::{projection_on_segment, Mat2, Mat4};
 use crate::params::Params;
+use crate::scan_data::{CorrespondenceType, ScanData};
 
-/// One weighted point correspondence in the form consumed by GPC.
+/// One weighted point correspondence.
 ///
-/// C: `struct gpc_corr` in `sm/lib/gpc/gpc.h`
 #[derive(Clone, Copy, Debug)]
-pub(crate) struct GpcCorrespondence {
+pub(crate) struct PointCorrespondence {
     pub p: [f64; 2],
     pub q: [f64; 2],
     pub c: [[f64; 2]; 2],
     pub valid: bool,
 }
 
-/// Build GPC correspondences and solve for the next ICP pose.
+/// Build point correspondences and solve for the next ICP pose.
 ///
-/// C: `compute_next_estimate()` in `sm/csm/icp/icp_loop.c`
 pub(crate) fn compute_next_estimate_with_scratch(
     params: &Params,
-    laser_ref: &LaserData,
-    laser_sens: &LaserData,
+    laser_ref: &ScanData,
+    laser_sens: &ScanData,
     x_old: [f64; 3],
-    correspondences: &mut Vec<GpcCorrespondence>,
+    correspondences: &mut Vec<PointCorrespondence>,
 ) -> Option<[f64; 3]> {
     correspondences.clear();
 
@@ -62,7 +55,7 @@ pub(crate) fn compute_next_estimate_with_scratch(
                 let one_on_norm = 1.0 / (diff[0] * diff[0] + diff[1] * diff[1]).sqrt();
                 let cos_alpha = diff[1] * one_on_norm;
                 let sin_alpha = -diff[0] * one_on_norm;
-                GpcCorrespondence {
+                PointCorrespondence {
                     p,
                     q,
                     c: [
@@ -72,7 +65,7 @@ pub(crate) fn compute_next_estimate_with_scratch(
                     valid: true,
                 }
             }
-            CorrespondenceType::PointToPoint => GpcCorrespondence {
+            CorrespondenceType::PointToPoint => PointCorrespondence {
                 p: laser_sens.points[i].p,
                 q: projection_on_segment(
                     laser_ref.points[j1].p,
@@ -86,7 +79,6 @@ pub(crate) fn compute_next_estimate_with_scratch(
 
         let mut factor = 1.0;
 
-        // C: `use_ml_weights` branch in `compute_next_estimate()`.
         if params.weights.ml {
             let alpha = if !laser_ref.true_alpha[j1].is_nan() {
                 Some(laser_ref.true_alpha[j1])
@@ -102,7 +94,6 @@ pub(crate) fn compute_next_estimate_with_scratch(
             }
         }
 
-        // C: `use_sigma_weights` branch in `compute_next_estimate()`.
         if params.weights.sigma {
             let sigma = laser_sens.readings_sigma[i];
             if !sigma.is_nan() {
@@ -118,18 +109,17 @@ pub(crate) fn compute_next_estimate_with_scratch(
         correspondences.push(correspondence);
     }
 
-    let x_new = gpc_solve(correspondences)?;
-    // C computes both values for its diagnostic check. Keep the same
+    let x_new = solve_correspondences(correspondences)?;
+    // Compute both values for the diagnostic check. Keep the same
     // observable arithmetic even though this tracer has no logging surface.
-    let _old_error = gpc_total_error(correspondences, x_old);
-    let _new_error = gpc_total_error(correspondences, x_new);
+    let _old_error = total_correspondence_error(correspondences, x_old);
+    let _new_error = total_correspondence_error(correspondences, x_new);
     Some(x_new)
 }
 
 /// Solve the weighted point-correspondence problem.
 ///
-/// C: `gpc_solve()` in `sm/lib/gpc/gpc.c`
-pub(crate) fn gpc_solve(correspondences: &[GpcCorrespondence]) -> Option<[f64; 3]> {
+pub(crate) fn solve_correspondences(correspondences: &[PointCorrespondence]) -> Option<[f64; 3]> {
     let (big_m, g) = normal_equations(correspondences);
 
     let m_a = Mat2::new([[big_m[0][0], big_m[0][1]], [big_m[1][0], big_m[1][1]]]);
@@ -137,7 +127,7 @@ pub(crate) fn gpc_solve(correspondences: &[GpcCorrespondence]) -> Option<[f64; 3
     let m_d = Mat2::new([[big_m[2][2], big_m[2][3]], [big_m[3][2], big_m[3][3]]]);
 
     let m_ai = m_a.inv()?;
-    // Keep the multiplication grouping used by GPC: inv(A)·B is formed
+    // Keep the multiplication grouping: inv(A)·B is formed
     // first, then Bᵀ·(inv(A)·B). The weighted path is sensitive to changing
     // this floating-point evaluation order.
     let m_ai_b = m_ai.mul(&m_b);
@@ -148,7 +138,6 @@ pub(crate) fn gpc_solve(correspondences: &[GpcCorrespondence]) -> Option<[f64; 3
 
     let g1 = [g[0], g[1]];
     let g2 = [g[2], g[3]];
-    // C: g1ᵀ·inv(A), followed by ·B (rather than g1ᵀ·(inv(A)·B)).
     let g1t_m_ai = row_mul_mat2(&g1, &m_ai);
     let m1t = row_mul_mat2(&g1t_m_ai, &m_b);
     let m2t = row_mul_mat2(&m1t, &m_sa);
@@ -179,10 +168,9 @@ pub(crate) fn gpc_solve(correspondences: &[GpcCorrespondence]) -> Option<[f64; 3
     Some([x[0], x[1], x[3].atan2(x[2])])
 }
 
-/// Assemble the normal equations used by GPC.
+/// Assemble the normal equations.
 ///
-/// C: the `d_bigM` and `d_g` accumulation in `sm/lib/gpc/gpc.c:gpc_solve()`
-fn normal_equations(correspondences: &[GpcCorrespondence]) -> ([[f64; 4]; 4], [f64; 4]) {
+fn normal_equations(correspondences: &[PointCorrespondence]) -> ([[f64; 4]; 4], [f64; 4]) {
     let mut d_big_m = [[0.0; 4]; 4];
     let mut d_g = [0.0; 4];
 
@@ -230,10 +218,9 @@ fn normal_equations(correspondences: &[GpcCorrespondence]) -> ([[f64; 4]; 4], [f
     (big_m, g)
 }
 
-/// Weighted squared error for one GPC correspondence.
+/// Weighted squared error for one correspondence.
 ///
-/// C: `gpc_error()` in `sm/lib/gpc/gpc.c`
-pub(crate) fn gpc_error(correspondence: &GpcCorrespondence, pose: [f64; 3]) -> f64 {
+pub(crate) fn correspondence_error(correspondence: &PointCorrespondence, pose: [f64; 3]) -> f64 {
     let cosine = pose[2].cos();
     let sine = pose[2].sin();
     let e0 =
@@ -245,14 +232,16 @@ pub(crate) fn gpc_error(correspondence: &GpcCorrespondence, pose: [f64; 3]) -> f
         + e1 * e1 * correspondence.c[1][1]
 }
 
-/// Total weighted squared error for a GPC correspondence list.
+/// Total weighted squared error for a correspondence list.
 ///
-/// C: `gpc_total_error()` in `sm/lib/gpc/gpc.c`
-pub(crate) fn gpc_total_error(correspondences: &[GpcCorrespondence], pose: [f64; 3]) -> f64 {
+pub(crate) fn total_correspondence_error(
+    correspondences: &[PointCorrespondence],
+    pose: [f64; 3],
+) -> f64 {
     correspondences
         .iter()
         .filter(|correspondence| correspondence.valid)
-        .map(|correspondence| gpc_error(correspondence, pose))
+        .map(|correspondence| correspondence_error(correspondence, pose))
         .sum()
 }
 
@@ -286,10 +275,9 @@ fn dot2(a: &[f64; 2], b: &[f64; 2]) -> f64 {
 }
 
 /// Greatest real root of the polynomial whose coefficients are ascending in
-/// degree. This replaces GSL's `gsl_poly_complex_solve()` for the quartic
-/// generated by GPC.
+/// degree. Solves the quartic generated by the correspondence solver
+/// directly, without a general-purpose polynomial library.
 ///
-/// C: `poly_greatest_real_root()` in `sm/lib/gpc/gpc_utils.c`
 fn greatest_real_root(coefficients: &[f64]) -> Option<f64> {
     let roots = real_roots(coefficients);
     roots.values[..roots.len]
@@ -298,7 +286,7 @@ fn greatest_real_root(coefficients: &[f64]) -> Option<f64> {
         .max_by(|a, b| a.partial_cmp(b).unwrap())
 }
 
-/// Fixed-capacity real-root set. GPC's polynomial is a quartic, so eight slots
+/// Fixed-capacity real-root set. The polynomial is a quartic, so eight slots
 /// cover every root of the polynomial and of its recursion derivatives without
 /// heap allocation in the prepared matching path.
 const MAX_ROOTS: usize = 64;
@@ -344,7 +332,7 @@ impl Roots {
 
 /// Real roots of a polynomial with coefficients ascending in degree.
 ///
-/// Allocation-free: the quartic GPC polynomial bounds the recursion depth, so
+/// Allocation-free: the quartic polynomial bounds the recursion depth, so
 /// stack arrays cover every intermediate polynomial.
 fn real_roots(coefficients: &[f64]) -> Roots {
     roots_impl(coefficients)
@@ -378,7 +366,10 @@ fn roots_impl(coefficients: &[f64]) -> Roots {
     let derivative_roots = roots_impl(&derivative[..n - 1]);
 
     let mut critical = Roots::new();
-    for root in derivative_roots.values[..derivative_roots.len].iter().copied() {
+    for root in derivative_roots.values[..derivative_roots.len]
+        .iter()
+        .copied()
+    {
         if root.is_finite() && root > -bound && root < bound {
             critical.push(root);
         }
@@ -482,14 +473,14 @@ mod tests {
     use super::*;
 
     #[test]
-    fn gpc_solves_known_rigid_motion() {
+    fn solves_known_rigid_motion() {
         // The expected pose and four transformed points are the independent
-        // worked example used to sanity-check the C GPC implementation.
+        // worked example used to sanity-check the solver.
         let expected: [f64; 3] = [0.4, -0.2, 0.3];
         let cosine = expected[2].cos();
         let sine = expected[2].sin();
         let points = [[1.0, 0.0], [0.0, 1.0], [-1.0, 0.0], [0.0, -1.0]];
-        let correspondences = points.map(|p| GpcCorrespondence {
+        let correspondences = points.map(|p| PointCorrespondence {
             p,
             q: [
                 cosine * p[0] - sine * p[1] + expected[0],
@@ -499,7 +490,7 @@ mod tests {
             valid: true,
         });
 
-        let actual = gpc_solve(&correspondences).expect("well-conditioned GPC system");
+        let actual = solve_correspondences(&correspondences).expect("well-conditioned system");
         for (actual, expected) in actual.into_iter().zip(expected) {
             assert!((actual - expected).abs() < 1e-9, "{actual} != {expected}");
         }
