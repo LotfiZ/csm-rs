@@ -1,6 +1,6 @@
 # csm-rs
 
-[![GPL-2.0-or-later Licensed](https://img.shields.io/badge/license-GPL--2.0--or--later-brightgreen.svg?style=flat-square)](LICENSE-GPL-2.0)
+[![LGPL-3.0-only Licensed](https://img.shields.io/badge/license-LGPL--3.0--only-brightgreen.svg?style=flat-square)](LICENSE)
 ![CI](https://github.com/LotfiZ/csm-rs/workflows/CI/badge.svg)
 
 Point-to-line ICP scan matching (Censi, 2007) with smart correspondence search,
@@ -143,9 +143,5 @@ See [CHANGELOG.md](CHANGELOG.md).
 
 ## License
 
-The scan, correspondence, ICP, and covariance modules derive from Andrea Censi's
-Canonical Scan Matcher (LGPLv3), and the closed-form solver derives from its
-vendored GPLv2-or-later solver. Because the GPL-derived solver is part of the
-combined crate, csm-rs is distributed under **GPL-2.0-or-later**. See
-[NOTICE.md](NOTICE.md) for component-level provenance and the included license
-texts.
+csm-rs is distributed under the **LGPL-3.0** license, the same as Andrea
+Censi's Canonical Scan Matcher, from which it derives. See [LICENSE](LICENSE).

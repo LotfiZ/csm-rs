@@ -51,9 +51,9 @@
 //!
 //! ## Licensing
 //!
-//! Derivative work of the Canonical Scan Matcher (LGPLv3) and its vendored
-//! solver (GPLv2+). Because the GPL-derived solver is part of this combined
-//! crate, distribution is under GPL-2.0-or-later; see the repository NOTICE.md.
+//! Derivative work of Andrea Censi's Canonical Scan Matcher, distributed under
+//! the GNU Lesser General Public License v3.0, the same license as the
+//! upstream project.
 
 #![deny(unsafe_code)]
 #![doc(test(attr(deny(warnings))))]
