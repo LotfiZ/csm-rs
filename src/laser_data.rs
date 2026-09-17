@@ -303,7 +303,6 @@ impl LaserData {
         self.alpha.fill(f64::NAN);
         self.cov_alpha.fill(f64::NAN);
         self.alpha_valid.fill(false);
-        self.true_alpha.fill(f64::NAN);
         self.corr.fill(Default::default());
     }
 

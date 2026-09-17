@@ -38,6 +38,39 @@ impl PreparedPolarScan {
         })
     }
 
+    /// Owned scan with optional per-ray sigma and known surface orientation
+    /// for the weighting paths.
+    pub fn from_polar_with_inputs(
+        angles: Vec<f64>,
+        readings: Vec<f64>,
+        valid: Vec<bool>,
+        sigma: Option<Vec<f64>>,
+        true_alpha: Option<Vec<f64>>,
+    ) -> Result<Self, ScanError> {
+        let mut scan = Self::from_polar(angles, readings, valid)?;
+        if let Some(sigma) = sigma {
+            if sigma.len() != scan.len() {
+                return Err(ScanError::InconsistentLengths {
+                    field: "sigma",
+                    expected: scan.len(),
+                    actual: sigma.len(),
+                });
+            }
+            scan.data.readings_sigma.copy_from_slice(&sigma);
+        }
+        if let Some(true_alpha) = true_alpha {
+            if true_alpha.len() != scan.len() {
+                return Err(ScanError::InconsistentLengths {
+                    field: "true_alpha",
+                    expected: scan.len(),
+                    actual: true_alpha.len(),
+                });
+            }
+            scan.data.true_alpha.copy_from_slice(&true_alpha);
+        }
+        Ok(scan)
+    }
+
     pub fn from_cartesian(points: &[[f64; 2]], valid: &[bool]) -> Result<Self, ScanError> {
         let scan = CartesianScan::new(points, valid)?;
         let (angles, readings) = scan.to_polar_parts();
@@ -116,6 +149,8 @@ impl PreparedPolarScan {
         self.data.theta.copy_from_slice(angles);
         self.data.readings.copy_from_slice(readings);
         self.data.valid.copy_from_slice(valid);
+        // A new frame invalidates previously supplied per-ray orientation.
+        self.data.true_alpha.fill(f64::NAN);
         self.input_valid.clear();
         self.input_valid.extend_from_slice(valid);
         self.data.min_theta = angles.first().copied().unwrap_or(f64::NAN);
@@ -170,9 +205,18 @@ impl PreparedPolarScan {
         &self.data.valid
     }
 
+    /// Per-ray range standard deviation, or `NaN` when unset.
+    pub fn sigma(&self) -> &[f64] {
+        &self.data.readings_sigma
+    }
+
+    /// Per-ray known surface orientation, or `NaN` when unset.
+    pub fn true_alpha(&self) -> &[f64] {
+        &self.data.true_alpha
+    }
+
     /// Refresh readings in place while retaining all allocated storage.
-    pub fn update(&mut self, readings: &[f64], valid: &[bool]) -> Result<(), ScanError> {
-        if readings.len() != self.data.nrays {
+    pub fn update(&mut self, readings: &[f64], valid: &[bool]) -> Result<(), ScanError> {        if readings.len() != self.data.nrays {
             if readings.len() > self.data.nrays {
                 return Err(ScanError::CapacityExceeded {
                     capacity: self.data.nrays,
@@ -195,6 +239,7 @@ impl PreparedPolarScan {
         self.data.readings.copy_from_slice(readings);
         self.data.valid.copy_from_slice(valid);
         self.input_valid.copy_from_slice(valid);
+        self.data.true_alpha.fill(f64::NAN);
         self.data.reset_derived();
         self.data.validate()
     }
@@ -224,6 +269,7 @@ impl PreparedPolarScan {
         }
         self.data.valid.copy_from_slice(valid);
         self.input_valid.copy_from_slice(valid);
+        self.data.true_alpha.fill(f64::NAN);
         self.data.reset_derived();
         self.data.validate()
     }
@@ -708,17 +754,23 @@ impl Matcher {
         sensor: PolarScan<'_>,
         guess: Pose,
     ) -> Result<MatchOutcome, ScanError> {
-        let mut reference = LaserData::from_polar(
+        let reference_sigma = reference.sigma();
+        let reference_alpha = reference.true_alpha();
+        let sensor_sigma = sensor.sigma();
+        let sensor_alpha = sensor.true_alpha();
+        let mut laser_ref = LaserData::from_polar(
             reference.angles().to_vec(),
             reference.readings().to_vec(),
             reference.valid().to_vec(),
         )?;
-        let mut sensor = LaserData::from_polar(
+        apply_weight_inputs(&mut laser_ref, reference_sigma, reference_alpha);
+        let mut laser_sens = LaserData::from_polar(
             sensor.angles().to_vec(),
             sensor.readings().to_vec(),
             sensor.valid().to_vec(),
         )?;
-        self.match_laser(&mut reference, &mut sensor, guess)
+        apply_weight_inputs(&mut laser_sens, sensor_sigma, sensor_alpha);
+        self.match_laser(&mut laser_ref, &mut laser_sens, guess)
     }
 
     /// Match ordered Cartesian scans with the identity initial pose.
@@ -784,6 +836,20 @@ impl Matcher {
         Ok(MatchOutcome::from(result)
             .with_diagnostics(&self.params)
             .with_termination(termination))
+    }
+}
+
+/// Copy optional weighting inputs onto a scan.
+fn apply_weight_inputs(scan: &mut LaserData, sigma: Option<&[f64]>, true_alpha: Option<&[f64]>) {
+    if let Some(sigma) = sigma {
+        if sigma.len() == scan.nrays {
+            scan.readings_sigma.copy_from_slice(sigma);
+        }
+    }
+    if let Some(true_alpha) = true_alpha {
+        if true_alpha.len() == scan.nrays {
+            scan.true_alpha.copy_from_slice(true_alpha);
+        }
     }
 }
 
