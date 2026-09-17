@@ -1,6 +1,7 @@
 //! Local browser demo for csm-rs: serves a single page and runs the real Rust
 //! matcher for every frame request.
 
+mod import;
 mod scene;
 mod simulation;
 
@@ -13,9 +14,12 @@ use std::time::Instant;
 use serde::{Deserialize, Serialize};
 
 use scene::Scene;
+use import::{export_session, replay_session, run_import, ScanPair};
+pub use import::ImportResponse;
 use simulation::{
-    guess_rng, initial_guess, pose_at, relative_pose, scan_for, ScanFrame, SimConfig,
+    guess_rng, initial_guess, pose_at, relative_pose, scan_for, ScanFrame, SessionRecord, SimConfig,
 };
+use axum::http::StatusCode;
 
 const INDEX_HTML: &str = include_str!("../web/index.html");
 
@@ -24,6 +28,27 @@ pub fn app() -> Router {
     Router::new()
         .route("/", get(index))
         .route("/api/frame", post(frame))
+        .route("/api/import", post(import))
+        .route("/api/replay", post(replay))
+        .route("/api/export", post(export))
+}
+
+async fn import(Json(pair): Json<ScanPair>) -> Result<Json<ImportResponse>, (StatusCode, String)> {
+    run_import(&pair)
+        .map(Json)
+        .map_err(|error| (StatusCode::BAD_REQUEST, error))
+}
+
+async fn replay(Json(record): Json<SessionRecord>) -> Result<Json<ImportResponse>, (StatusCode, String)> {
+    replay_session(&record)
+        .map(Json)
+        .map_err(|error| (StatusCode::BAD_REQUEST, error))
+}
+
+async fn export(Json(config): Json<SimConfig>) -> Result<Json<SessionRecord>, (StatusCode, String)> {
+    export_session(&config)
+        .map(Json)
+        .map_err(|error| (StatusCode::INTERNAL_SERVER_ERROR, error))
 }
 
 pub async fn index() -> axum::response::Html<&'static str> {
