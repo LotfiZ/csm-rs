@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.1.0 — Unreleased
+## 0.1.0 — 2026-09-19
 
 First public release of the Rust port of Andrea Censi's Canonical Scan Matcher.
 
