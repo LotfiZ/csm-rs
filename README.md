@@ -3,7 +3,7 @@
 <img src="assets/logo.svg" alt="csm-rs logo" width="320">
 
 [![LGPL-3.0-only Licensed](https://img.shields.io/badge/license-LGPL--3.0--only-brightgreen.svg?style=flat-square)](LICENSE)
-![CI](https://github.com/LotfiZ/csm-rs/workflows/CI/badge.svg)
+[![CI](https://github.com/LotfiZ/csm-rs/workflows/CI/badge.svg)](https://github.com/LotfiZ/csm-rs/actions/workflows/ci.yml)
 
 </div>
 
