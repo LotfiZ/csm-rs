@@ -12,9 +12,5 @@ description = "Point-to-line ICP scan matching with smart correspondence search 
 
 [dependencies]
 
-[workspace]
-resolver = "2"
-members = [".", "demo"]
-
 [profile.release]
 lto = true

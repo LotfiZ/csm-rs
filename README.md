@@ -1,12 +1,18 @@
-# csm-rs
+<div align="center">
+
+<img src="assets/logo.svg" alt="csm-rs logo" width="320">
 
 [![LGPL-3.0-only Licensed](https://img.shields.io/badge/license-LGPL--3.0--only-brightgreen.svg?style=flat-square)](LICENSE)
 ![CI](https://github.com/LotfiZ/csm-rs/workflows/CI/badge.svg)
 
-Point-to-line ICP scan matching (Censi, 2007) with smart correspondence search,
-outlier rejection, restart handling, and an optional closed-form estimate of the
-matching covariance. The library has no runtime dependencies and is built around
-ordered scans, validated configuration, matching, and results.
+</div>
+
+A Rust port of Andrea Censi's [Canonical Scan Matcher](https://github.com/AndreaCensi/csm)
+for point-to-line ICP matching of ordered 2D laser scans. The library provides
+validated scan inputs, explicit matching outcomes, and optional uncertainty
+estimation, with no runtime dependencies.
+
+Experimental: APIs may change before 1.0. Support is best effort.
 
 ## Requirements
 
@@ -14,7 +20,7 @@ Rust 1.70 or newer. The library itself has no dependencies.
 
 ## Installation
 
-The crate is not published on crates.io. Add it as a git dependency:
+Add the library as a git dependency:
 
 ```toml
 [dependencies]
@@ -49,6 +55,15 @@ A self-contained example that simulates a robot in a square room is included:
 ```sh
 cargo run -p csm-rs --example scan_matching
 ```
+
+## Features
+
+- Ordered polar and Cartesian scans, with validated inputs and configuration.
+- Point-to-line ICP with smart correspondence search, outlier rejection,
+  visibility and orientation handling, restarts, and optional weighting.
+- Explicit initial poses, caller-selected reference scans, and termination reasons.
+- Optional closed-form covariance, derivative matrices, and Fisher information.
+- Reusable prepared workspaces with allocation-free repeated pose-only matching.
 
 ## Coordinates and inputs
 
@@ -103,33 +118,11 @@ afterwards performs no heap allocation. Capacity is explicit: inputs larger than
 the reserved capacity return `ScanError::CapacityExceeded` instead of growing
 mid-match. Grow it with `PreparedMatcher::reserve`.
 
-## Performance
-
-Measured on a Jetson AGX Xavier (8× ARMv8, `--release`), synthetic ordered polar
-scans. Latency excludes preparation; measure on your own hardware before
-relying on these figures.
-
-| scan | mode | mean | p99 |
-| ---: | --- | ---: | ---: |
-| 2,048 rays | pose only | 5.4 ms | 7.3 ms |
-| 3,000 rays | pose only | 10.2 ms | 13.6 ms |
-| 3,000 rays | with covariance | 11.7 ms | 14.4 ms |
-| 10,000 rays | pose only | 124 ms | 129 ms |
-
-Typical 2,000–3,000-point scans support 20–30 Hz cycles. Larger scans scale
-super-linearly. These are ordinary Linux figures, not a hard real-time
-guarantee.
-
 ## Interactive demo
 
-A local browser demo runs the real matcher and shows the reference, unaligned,
-and aligned scans:
-
-```sh
-cargo run -p csm-rs-demo --release
-```
-
-Then open <http://127.0.0.1:7878>. See [demo/README.md](demo/README.md).
+Explore generated scans, matching results, and iteration traces in the companion
+[csm-rs-demo](https://github.com/LotfiZ/csm-rs-demo). It runs locally in a browser
+and has its own dependencies and release cycle.
 
 ## Testing
 
@@ -141,7 +134,16 @@ cargo test
 
 See [CHANGELOG.md](CHANGELOG.md).
 
-## License
+## Contributing
 
-csm-rs is distributed under the **LGPL-3.0** license, the same as Andrea
-Censi's Canonical Scan Matcher, from which it derives. See [LICENSE](LICENSE).
+Issues and small pull requests are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md)
+for checks and bug-report details.
+
+## Credits and license
+
+This Rust implementation derives from Andrea Censi's
+[Canonical Scan Matcher](https://github.com/AndreaCensi/csm), the original C
+implementation of the point-to-line ICP algorithm. Credit for the original
+algorithm and implementation belongs to its authors.
+
+Distributed under **LGPL-3.0-only**. See [LICENSE](LICENSE).
