@@ -146,4 +146,5 @@ This Rust implementation derives from Andrea Censi's
 implementation of the point-to-line ICP algorithm. Credit for the original
 algorithm and implementation belongs to its authors.
 
-Distributed under **LGPL-3.0-only**. See [LICENSE](LICENSE).
+Distributed under **LGPL-3.0-only**. See [LICENSE](LICENSE) and the accompanying
+[GPLv3 text](COPYING), which the LGPL incorporates.
