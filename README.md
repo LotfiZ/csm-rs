@@ -2,8 +2,6 @@
 
 <img src="assets/logo.svg" alt="csm-rs logo" width="320">
 
-<h1>csm-rs</h1>
-
 [![LGPL-3.0-only Licensed](https://img.shields.io/badge/license-LGPL--3.0--only-brightgreen.svg?style=flat-square)](LICENSE)
 ![CI](https://github.com/LotfiZ/csm-rs/workflows/CI/badge.svg)
 
@@ -148,5 +146,4 @@ This Rust implementation derives from Andrea Censi's
 implementation of the point-to-line ICP algorithm. Credit for the original
 algorithm and implementation belongs to its authors.
 
-Distributed under **LGPL-3.0-only**. See [LICENSE](LICENSE) and the accompanying
-[GNU GPLv3 text](COPYING).
+Distributed under **LGPL-3.0-only**. See [LICENSE](LICENSE).
